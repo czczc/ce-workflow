@@ -16,6 +16,7 @@ backend/.venv/
 frontend/node_modules/
 frontend/dist/
 backend/data/
+docker/storage/
 .claude
 # .scratch
 graphify-out/
