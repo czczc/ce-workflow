@@ -123,7 +123,7 @@ class DocumentStore:
         return list(seen.values())
 
     def hybrid_search(
-        self, query_vector: list[float], query_text: str, k: int
+        self, query_vector: list[float], query_text: str, k: int, min_score: float = 0.0
     ) -> list[Chunk]:
         existing = {c.name for c in self.client.get_collections().collections}
         if settings.dense_collection not in existing:
@@ -161,7 +161,7 @@ class DocumentStore:
             scores[pt_id] = scores.get(pt_id, 0.0) + 1.0 / (60 + rank + 1)
             id_to_payload.setdefault(pt_id, hit.payload)
 
-        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:k]
+        ranked = [(pt_id, s) for pt_id, s in sorted(scores.items(), key=lambda x: x[1], reverse=True) if s >= min_score][:k]
 
         return [
             Chunk(

@@ -7,4 +7,10 @@ export default defineConfig({
     vue(),
     vuetify({ autoImport: true }),
   ],
+  server: {
+    proxy: {
+      '/chat': 'http://127.0.0.1:8000',
+      '/documents': 'http://127.0.0.1:8000',
+    },
+  },
 })
