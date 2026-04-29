@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -36,13 +37,19 @@ def ingest(file: str | Path, options: dict[str, Any] | None = None) -> str:
     texts = _split_chunks(text, chunk_size, overlap)
 
     doc_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, str(path.resolve())))
+    ingested_at = datetime.now(timezone.utc).isoformat()
     store = DocumentStore()
     chunks = [
         Chunk(
             id=f"{doc_id}_{i}",
             text=t,
             vector=embed(t),
-            metadata={"doc_id": doc_id, "source": path.name, "chunk_index": i},
+            metadata={
+                "doc_id": doc_id,
+                "source": opts.get("filename", path.name),
+                "chunk_index": i,
+                "ingested_at": ingested_at,
+            },
         )
         for i, t in enumerate(texts)
     ]

@@ -93,6 +93,35 @@ class DocumentStore:
             ],
         )
 
+    def list_documents(self) -> list[dict]:
+        existing = {c.name for c in self.client.get_collections().collections}
+        if settings.dense_collection not in existing:
+            return []
+
+        seen: dict[str, dict] = {}
+        offset = None
+        while True:
+            result, offset = self.client.scroll(
+                settings.dense_collection,
+                offset=offset,
+                limit=100,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in result:
+                p = point.payload or {}
+                doc_id = p.get("doc_id")
+                if doc_id and doc_id not in seen:
+                    seen[doc_id] = {
+                        "id": doc_id,
+                        "filename": p.get("source", ""),
+                        "ingested_at": p.get("ingested_at", ""),
+                    }
+            if offset is None:
+                break
+
+        return list(seen.values())
+
     def hybrid_search(
         self, query_vector: list[float], query_text: str, k: int
     ) -> list[Chunk]:
