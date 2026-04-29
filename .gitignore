@@ -13,3 +13,4 @@ wheels/
 # .scratch
 graphify-out/
 out/
+.idea/
