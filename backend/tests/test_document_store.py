@@ -7,17 +7,22 @@ import pytest
 from document_store import Chunk, DocumentStore
 from config import settings
 
+_TEST_DENSE = settings.dense_collection + "_test"
+_TEST_SPARSE = settings.sparse_collection + "_test"
+
 
 @pytest.fixture
-def store():
+def store(monkeypatch):
+    monkeypatch.setattr(settings, "dense_collection", _TEST_DENSE)
+    monkeypatch.setattr(settings, "sparse_collection", _TEST_SPARSE)
     ds = DocumentStore()
-    for name in (settings.dense_collection, settings.sparse_collection):
+    for name in (_TEST_DENSE, _TEST_SPARSE):
         try:
             ds.client.delete_collection(name)
         except Exception:
             pass
     yield ds
-    for name in (settings.dense_collection, settings.sparse_collection):
+    for name in (_TEST_DENSE, _TEST_SPARSE):
         try:
             ds.client.delete_collection(name)
         except Exception:
