@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
     "pydantic-settings>=2.14.0",
+    "pypdf>=6.10.2",
     "pytest>=9.0.3",
     "python-dotenv>=1.2.2",
     "qdrant-client>=1.17.1",
