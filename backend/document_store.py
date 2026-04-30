@@ -150,14 +150,18 @@ class DocumentStore:
 
         scores: dict[str, float] = {}
         id_to_payload: dict[str, dict] = {}
+        dense_ids: set[str] = set()
+        sparse_ids: set[str] = set()
 
         for rank, hit in enumerate(dense_hits):
             pt_id = str(hit.id)
+            dense_ids.add(pt_id)
             scores[pt_id] = scores.get(pt_id, 0.0) + 1.0 / (60 + rank + 1)
             id_to_payload[pt_id] = hit.payload
 
         for rank, hit in enumerate(sparse_hits):
             pt_id = str(hit.id)
+            sparse_ids.add(pt_id)
             scores[pt_id] = scores.get(pt_id, 0.0) + 1.0 / (60 + rank + 1)
             id_to_payload.setdefault(pt_id, hit.payload)
 
@@ -172,7 +176,11 @@ class DocumentStore:
                     k: v
                     for k, v in id_to_payload[pt_id].items()
                     if k not in ("_chunk_id", "text")
+                } | {
+                    "_rrf_score": score,
+                    "_in_dense": pt_id in dense_ids,
+                    "_in_sparse": pt_id in sparse_ids,
                 },
             )
-            for pt_id, _ in ranked
+            for pt_id, score in ranked
         ]

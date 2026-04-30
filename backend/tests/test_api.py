@@ -8,7 +8,8 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from main import app
+from document_store import Chunk
+from main import NO_CONTEXT_REPLY, app
 
 client = TestClient(app)
 
@@ -20,8 +21,8 @@ class _FakeOllamaResponse:
         pass
 
     async def aiter_lines(self):
-        yield '{"response": "hello", "done": false}'
-        yield '{"response": " world", "done": true}'
+        yield '{"message": {"role": "assistant", "content": "hello"}, "done": false}'
+        yield '{"message": {"role": "assistant", "content": " world"}, "done": true}'
 
 
 class _FakeStream:
@@ -47,9 +48,29 @@ class _FakeHttpxClientCtx:
 
 # --- tests ---
 
+def test_chat_stream_no_context_returns_static_reply():
+    with patch("main.query", return_value=[]):
+        resp = client.post("/chat/stream", json={"message": "what is cold electronics?"})
+
+    assert resp.status_code == 200
+    events = [line for line in resp.text.splitlines() if line.startswith("data:")]
+    payloads = [e[len("data: "):] for e in events]
+
+    assert json.loads(payloads[0]) == {"type": "loading"}
+    assert json.loads(payloads[1]) == {"type": "token", "text": NO_CONTEXT_REPLY}
+    assert payloads[2] == "[DONE]"
+
+
 def test_chat_stream_emits_loading_then_tokens():
+    fake_chunk = Chunk(
+        id="c1", text="cold electronics use cryogenic detectors",
+        vector=[0.1], metadata={
+            "source": "detector.txt", "chunk_index": 0,
+            "_rrf_score": 0.016, "_in_dense": True, "_in_sparse": False,
+        }
+    )
     with (
-        patch("main.query", return_value=[]),
+        patch("main.query", return_value=[fake_chunk]),
         patch("httpx.AsyncClient", return_value=_FakeHttpxClientCtx()),
     ):
         resp = client.post("/chat/stream", json={"message": "what is cold electronics?"})
@@ -61,9 +82,22 @@ def test_chat_stream_emits_loading_then_tokens():
     payloads = [e[len("data: "):] for e in events]
 
     assert json.loads(payloads[0]) == {"type": "loading"}
-    assert json.loads(payloads[1]) == {"type": "token", "text": "hello"}
-    assert json.loads(payloads[2]) == {"type": "token", "text": " world"}
-    assert payloads[3] == "[DONE]"
+    assert json.loads(payloads[1]) == {"type": "sources", "sources": ["detector.txt"]}
+
+    retrieval = json.loads(payloads[2])
+    assert retrieval["type"] == "retrieval"
+    assert len(retrieval["chunks"]) == 1
+    c = retrieval["chunks"][0]
+    assert c["source"] == "detector.txt"
+    assert c["chunk_index"] == 0
+    assert c["rrf_score"] == 0.016
+    assert c["in_dense"] is True
+    assert c["in_sparse"] is False
+    assert c["text"] == "cold electronics use cryogenic detectors"
+
+    assert json.loads(payloads[3]) == {"type": "token", "text": "hello"}
+    assert json.loads(payloads[4]) == {"type": "token", "text": " world"}
+    assert payloads[5] == "[DONE]"
 
 
 def test_upload_document_returns_doc_id(tmp_path):

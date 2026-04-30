@@ -26,30 +26,63 @@ class ChatRequest(BaseModel):
     message: str
 
 
+SYSTEM_PROMPT = (
+    "Answer only using the provided context. "
+    "If the answer isn't in the context, say so explicitly. "
+    "Do not use outside knowledge."
+)
+
+NO_CONTEXT_REPLY = "I don't have any relevant documents to answer that question."
+
+
 async def _stream_chat(message: str):
     yield f"data: {json.dumps({'type': 'loading'})}\n\n"
 
     chunks = query(message)
     context = "\n\n".join(c.text for c in chunks)
-    prompt = f"Context:\n{context}\n\nQuestion: {message}" if context else message
 
     sources = sorted({c.metadata.get("source", "") for c in chunks if c.metadata.get("source")})
     if sources:
         yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
 
+    if chunks:
+        retrieval = [
+            {
+                "source": c.metadata.get("source", ""),
+                "chunk_index": c.metadata.get("chunk_index", 0),
+                "rrf_score": round(c.metadata.get("_rrf_score", 0.0), 4),
+                "in_dense": c.metadata.get("_in_dense", False),
+                "in_sparse": c.metadata.get("_in_sparse", False),
+                "text": c.text,
+            }
+            for c in chunks
+        ]
+        yield f"data: {json.dumps({'type': 'retrieval', 'chunks': retrieval})}\n\n"
+
+    if not context:
+        yield f"data: {json.dumps({'type': 'token', 'text': NO_CONTEXT_REPLY})}\n\n"
+        yield "data: [DONE]\n\n"
+        return
+
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {message}"},
+    ]
+
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
             "POST",
-            f"{settings.ollama_base_url}/api/generate",
-            json={"model": settings.reasoning_model, "prompt": prompt, "stream": True, "think": False},
+            f"{settings.ollama_base_url}/api/chat",
+            json={"model": settings.reasoning_model, "messages": messages, "stream": True, "think": False},
         ) as resp:
             resp.raise_for_status()
             async for line in resp.aiter_lines():
                 if not line:
                     continue
                 data = json.loads(line)
-                if data.get("response"):
-                    yield f"data: {json.dumps({'type': 'token', 'text': data['response']})}\n\n"
+                token = data.get("message", {}).get("content", "")
+                if token:
+                    yield f"data: {json.dumps({'type': 'token', 'text': token})}\n\n"
                 if data.get("done"):
                     break
 
