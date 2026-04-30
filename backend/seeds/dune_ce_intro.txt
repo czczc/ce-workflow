@@ -1,0 +1,79 @@
+DUNE Cold Electronics Technical Note
+Cold Front-End ASIC Overview
+Document: DUNE-CE-TN-001
+
+1. Introduction
+
+The DUNE Far Detector employs liquid-argon time-projection chambers (LArTPCs) operating at 87 K.
+All front-end electronics are immersed in the cryostat and must function reliably at cryogenic
+temperatures. The cold electronics (CE) chain consists of three custom ASICs: LArASIC, COLDADC,
+and COLDATA.
+
+2. LArASIC
+
+LArASIC is a 16-channel, low-noise preamplifier and shaper. Each channel provides:
+  - Continuous variable gain: 4.7, 7.8, 14, or 25 mV/fC
+  - Peaking time: 0.5, 1, 2, or 3 µs (selectable)
+  - Equivalent noise charge (ENC): < 400 e- at 150 pF detector capacitance
+  - On-chip 12-bit ADC for monitoring bias and temperature
+
+The preamplifier uses a charge-sensitive architecture with a PMOS input transistor optimized
+for operation at 77–89 K. A baseline restoration circuit prevents saturation from accumulated
+leakage current.
+
+3. COLDADC
+
+COLDADC is a 16-channel, 12-bit successive-approximation ADC running at 2 MS/s per channel.
+Key specifications:
+  - ENOB: 11.0 bits at 200 kHz input frequency
+  - Power consumption: 1.2 mW per channel at 1.8 V supply
+  - Input range: 0.2–1.6 V differential
+
+Each COLDADC digitizes the shaped output of one LArASIC and transmits data over a low-voltage
+differential signalling (LVDS) link to the COLDATA aggregator.
+
+4. COLDATA
+
+COLDATA aggregates serial data from eight LArASIC–COLDADC pairs into a single 1.28 Gbps
+optical uplink. It distributes a 62.5 MHz clock and synchronisation commands to all front-end
+chips on the same cold motherboard (FEMB).
+
+Functions include:
+  - Clock distribution and phase alignment
+  - Configuration and monitoring via an I2C slow-control bus
+  - Error detection and correction on the uplink
+
+5. Front-End Motherboard (FEMB)
+
+One FEMB carries eight LArASIC chips, eight COLDADC chips, and one COLDATA chip, reading
+128 channels. FEMBs connect to wire planes via flexible cables (SHV and signal). Each APA
+(Anode Plane Assembly) supports 20 FEMBs covering 2560 wire channels.
+
+6. Wire Bias Voltages
+
+Collection wires: +820 V
+First induction wires: −370 V
+Second induction wires: 0 V (grounded)
+Grid wires: −665 V
+
+Bias voltages are supplied by the warm bias voltage board (BVB) located outside the cryostat.
+Stability requirements: ±1 V drift over 24 hours.
+
+7. Acceptance Testing Procedure
+
+Each FEMB undergoes the following tests before installation:
+  a) Room-temperature function check: verify I2C communication, clock lock, data link integrity.
+  b) Cold dip test: immerse in LN2 for 15 minutes; repeat function check while cold.
+  c) Noise measurement: inject a known charge and verify ENC < 500 e- per channel.
+  d) Crosstalk measurement: drive one channel and verify coupling < 0.5% on adjacent channels.
+  e) Gain and peaking-time calibration: record per-channel gain map; flag channels > ±10% of nominal.
+
+Boards failing any criterion are quarantined and logged in the QC database.
+
+8. Known Issues and Mitigations
+
+Issue: COLDADC dynamic range saturation at low peaking times with 25 mV/fC gain.
+Mitigation: Restrict gain–peaking-time combinations per gain-setting table in the configuration register.
+
+Issue: LArASIC baseline shift (< 5 mV) after rapid temperature cycling.
+Mitigation: Allow 10-minute thermal stabilisation before noise measurements.

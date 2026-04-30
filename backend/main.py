@@ -33,11 +33,15 @@ async def _stream_chat(message: str):
     context = "\n\n".join(c.text for c in chunks)
     prompt = f"Context:\n{context}\n\nQuestion: {message}" if context else message
 
+    sources = sorted({c.metadata.get("source", "") for c in chunks if c.metadata.get("source")})
+    if sources:
+        yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
+
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
             "POST",
             f"{settings.ollama_base_url}/api/generate",
-            json={"model": settings.reasoning_model, "prompt": prompt, "stream": True},
+            json={"model": settings.reasoning_model, "prompt": prompt, "stream": True, "think": False},
         ) as resp:
             resp.raise_for_status()
             async for line in resp.aiter_lines():

@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@mdi/font": "^7.4.47",
+    "marked": "^18.0.2",
     "vue": "^3.4.0",
     "vuetify": "^3.6.0"
   },

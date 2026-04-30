@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     )
 
     ollama_base_url: str = "http://localhost:11434"
-    reasoning_model: str = "qwen3:4b"
+    reasoning_model: str = "qwen3.5:4b"
     embedding_model: str = "nomic-embed-text:v1.5"
 
     qdrant_url: str = "http://localhost:6333"
