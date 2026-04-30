@@ -34,10 +34,20 @@ uv sync
 ## Start
 
 ```bash
-uv run uvicorn main:app --reload
+uv run uvicorn main:app
 ```
 
 API available at `http://localhost:8000`.
+
+### Auto-reload during development
+
+Pass `--reload` to restart the server on file changes. By default uvicorn uses polling, which causes ~30% CPU usage even when idle. Install `watchfiles` to switch to native OS filesystem events (same approach Vite uses) and get
+near-zero idle CPU:
+
+```bash
+uv add watchfiles
+uv run uvicorn main:app --reload
+```
 
 ## Seed the knowledge base
 
