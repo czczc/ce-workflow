@@ -23,5 +23,7 @@ class Settings(BaseSettings):
 
     sqlite_db_path: str = "data/qc.db"
 
+    hardware_check_url: str = "http://127.0.0.1:8000/hardware/anomaly-check"
+
 
 settings = Settings()

@@ -1,4 +1,5 @@
 import json
+import random
 import tempfile
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 
 from config import settings
 from document_store import DocumentStore
+from monitor_agent import run_monitor_agent
 from rag_pipeline import ingest, query
 
 app = FastAPI()
@@ -93,6 +95,23 @@ async def _stream_chat(message: str):
 async def chat_stream(body: ChatRequest):
     return StreamingResponse(
         _stream_chat(body.message),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/hardware/anomaly-check")
+async def hardware_anomaly_check():
+    """Placeholder hardware anomaly detection service. Replace with real service URL via HARDWARE_CHECK_URL."""
+    if random.random() < 0.2:
+        return {"status": "defect detected", "detail": "Pin misalignment detected on COLDADC socket"}
+    return {"status": "good", "detail": "No visual anomalies detected"}
+
+
+@app.post("/qc/start")
+async def qc_start():
+    return StreamingResponse(
+        run_monitor_agent(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

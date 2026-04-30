@@ -1,15 +1,61 @@
 <template>
-  <v-card>
+  <v-card class="mt-2">
     <v-card-text>
-      <v-btn block color="secondary" @click="show = true">QC Start</v-btn>
-      <v-alert v-if="show" type="info" class="mt-3" density="compact" closable @click:close="show = false">
-        QC Start is not yet available.
-      </v-alert>
+      <v-btn
+        block
+        color="secondary"
+        :loading="running"
+        :disabled="streaming"
+        @click="startQc"
+      >QC Start</v-btn>
     </v-card-text>
   </v-card>
 </template>
 
 <script setup>
 import { ref } from 'vue'
-const show = ref(false)
+import { useChat } from '../composables/useChat.js'
+
+const API = ''
+const { messages, streaming } = useChat()
+const running = ref(false)
+
+async function startQc() {
+  if (running.value || streaming.value) return
+
+  running.value = true
+  streaming.value = true
+  messages.value.push({ role: 'agent', text: '', sources: [], retrieval: [] })
+  const idx = messages.value.length - 1
+
+  try {
+    const resp = await fetch(`${API}/qc/start`, { method: 'POST' })
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop()
+      for (const part of parts) {
+        const line = part.trim()
+        if (!line.startsWith('data: ')) continue
+        const data = line.slice(6)
+        if (data === '[DONE]') break
+        const evt = JSON.parse(data)
+        if (evt.type === 'token') {
+          messages.value[idx].text += evt.text
+        }
+      }
+    }
+  } catch (err) {
+    messages.value[idx].text = `Error: ${err.message}`
+  } finally {
+    running.value = false
+    streaming.value = false
+  }
+}
 </script>

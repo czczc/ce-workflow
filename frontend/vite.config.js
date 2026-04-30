@@ -11,6 +11,7 @@ export default defineConfig({
     proxy: {
       '/chat': 'http://127.0.0.1:8000',
       '/documents': 'http://127.0.0.1:8000',
+      '/qc': 'http://127.0.0.1:8000',
     },
   },
 })

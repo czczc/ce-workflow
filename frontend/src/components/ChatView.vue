@@ -55,15 +55,20 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, watch } from 'vue'
 import { marked } from 'marked'
+import { useChat } from '../composables/useChat.js'
 
 const API = ''
 
-const messages = ref([])
+const { messages, streaming } = useChat()
 const input = ref('')
-const streaming = ref(false)
 const threadRef = ref(null)
+
+watch(
+  () => messages.value.length,
+  () => scrollToBottom(),
+)
 
 function render(text) {
   return text ? marked.parse(text) : ''
