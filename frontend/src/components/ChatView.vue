@@ -15,6 +15,19 @@
           <div v-if="msg.sources?.length" class="msg-sources">
             <span v-for="s in msg.sources" :key="s" class="msg-source-tag">{{ s }}</span>
           </div>
+          <details v-if="msg.retrieval?.length" class="msg-retrieval">
+            <summary>Retrieved chunks ({{ msg.retrieval.length }})</summary>
+            <div v-for="(c, i) in msg.retrieval" :key="i" class="retrieval-chunk">
+              <div class="retrieval-chunk-meta">
+                <span class="retrieval-source">{{ c.source }}</span>
+                <span class="retrieval-index">#{{ c.chunk_index }}</span>
+                <span class="retrieval-score">RRF {{ c.rrf_score.toFixed(3) }}</span>
+                <span v-if="c.in_dense" class="retrieval-badge retrieval-badge-dense">dense</span>
+                <span v-if="c.in_sparse" class="retrieval-badge retrieval-badge-sparse">sparse</span>
+              </div>
+              <div class="retrieval-chunk-text">{{ c.text }}</div>
+            </div>
+          </details>
         </div>
       </div>
       <div v-if="streaming && !messages[messages.length - 1]?.text" class="d-flex justify-start mb-3">
@@ -72,7 +85,7 @@ async function send() {
   scrollToBottom()
 
   streaming.value = true
-  messages.value.push({ role: 'agent', text: '', sources: [] })
+  messages.value.push({ role: 'agent', text: '', sources: [], retrieval: [] })
   const idx = messages.value.length - 1
 
   try {
@@ -103,6 +116,8 @@ async function send() {
           scrollToBottom()
         } else if (evt.type === 'sources') {
           messages.value[idx].sources = evt.sources
+        } else if (evt.type === 'retrieval') {
+          messages.value[idx].retrieval = evt.chunks
         }
       }
     }
@@ -128,8 +143,8 @@ async function send() {
   color: rgb(var(--v-theme-on-primary));
 }
 .msg-agent {
-  background: rgb(var(--v-theme-surface-variant));
-  color: rgb(var(--v-theme-on-surface-variant));
+  background: #f1f3f4;
+  color: #202124;
 }
 .msg-sources {
   margin-top: 8px;
@@ -155,4 +170,46 @@ async function send() {
 .msg-bubble :deep(h1),
 .msg-bubble :deep(h2),
 .msg-bubble :deep(h3) { margin: 8px 0 4px; font-size: 1em; font-weight: 600; }
+.msg-retrieval {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  font-size: 0.75rem;
+}
+.msg-retrieval summary {
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.5);
+  user-select: none;
+}
+.retrieval-chunk {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+}
+.retrieval-chunk-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.retrieval-source { font-weight: 600; }
+.retrieval-index  { color: rgba(0, 0, 0, 0.45); }
+.retrieval-score  { color: rgba(0, 0, 0, 0.45); }
+.retrieval-badge {
+  font-size: 0.68rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.retrieval-badge-dense  { background: #dbeafe; color: #1d4ed8; }
+.retrieval-badge-sparse { background: #fef9c3; color: #854d0e; }
+.retrieval-chunk-text {
+  white-space: pre-wrap;
+  color: rgba(0, 0, 0, 0.7);
+  line-height: 1.4;
+}
 </style>
