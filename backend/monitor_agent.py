@@ -1,6 +1,10 @@
 import json
+from typing import TypedDict
 
 import httpx
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_ollama import ChatOllama
+from langgraph.graph import END, START, StateGraph
 
 from config import settings
 
@@ -11,53 +15,66 @@ MONITOR_SYSTEM_PROMPT = (
     "If a defect is detected, clearly describe the finding and instruct the operator to fix it before proceeding."
 )
 
+_llm = ChatOllama(
+    model=settings.reasoning_model,
+    base_url=settings.ollama_base_url,
+    reasoning=settings.reasoning_model_think,
+)
 
-async def run_monitor_agent():
-    yield f"data: {json.dumps({'type': 'token', 'text': '*Checking hardware status...*\n\n'})}\n\n"
 
+class MonitorState(TypedDict):
+    hardware_result: dict
+    response: str
+
+
+async def check_hardware(state: MonitorState) -> dict:
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             resp = await client.get(settings.hardware_check_url)
             resp.raise_for_status()
             result = resp.json()
         except Exception as exc:
-            yield f"data: {json.dumps({'type': 'token', 'text': f'**Error contacting hardware anomaly detection service:** {exc}\n'})}\n\n"
-            yield "data: [DONE]\n\n"
-            return
+            result = {"status": "error", "detail": str(exc)}
+    return {"hardware_result": result}
 
-    status = result.get("status", "unknown")
-    detail = result.get("detail", "")
 
-    user_content = (
-        f"Hardware anomaly detection result:\n```json\n{json.dumps(result, indent=2)}\n```\n\n"
-        "Provide your assessment and next step."
-    )
-
+async def respond(state: MonitorState) -> dict:
+    result = state["hardware_result"]
     messages = [
-        {"role": "system", "content": MONITOR_SYSTEM_PROMPT},
-        {"role": "user", "content": user_content},
+        SystemMessage(content=MONITOR_SYSTEM_PROMPT),
+        HumanMessage(
+            content=(
+                f"Hardware anomaly detection result:\n```json\n{json.dumps(result, indent=2)}\n```\n\n"
+                "Provide your assessment and next step."
+            )
+        ),
     ]
+    ai_message = await _llm.ainvoke(messages)
+    return {"response": ai_message.content}
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        async with client.stream(
-            "POST",
-            f"{settings.ollama_base_url}/api/chat",
-            json={
-                "model": settings.reasoning_model,
-                "messages": messages,
-                "stream": True,
-                "think": False,
-            },
-        ) as resp:
-            resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line:
-                    continue
-                data = json.loads(line)
-                token = data.get("message", {}).get("content", "")
-                if token:
-                    yield f"data: {json.dumps({'type': 'token', 'text': token})}\n\n"
-                if data.get("done"):
-                    break
+
+_builder = StateGraph(MonitorState)
+_builder.add_node("check_hardware", check_hardware)
+_builder.add_node("respond", respond)
+_builder.add_edge(START, "check_hardware")
+_builder.add_edge("check_hardware", "respond")
+_builder.add_edge("respond", END)
+graph = _builder.compile()
+
+
+async def run_monitor_agent():
+    yield f"data: {json.dumps({'type': 'token', 'text': '*Checking hardware status...*\n\n'})}\n\n"
+
+    async for mode, data in graph.astream(  # type: ignore[misc]
+        {"hardware_result": {}, "response": ""},
+        stream_mode=["messages", "updates"],
+    ):
+        if mode == "updates" and "check_hardware" in data:  # type: ignore[operator]
+            result = data["check_hardware"].get("hardware_result", {})  # type: ignore[index]
+            yield f"data: {json.dumps({'type': 'tool_result', 'tool': 'hardware_anomaly_check', 'result': result})}\n\n"
+        elif mode == "messages":
+            msg, _ = data  # type: ignore[misc]
+            if msg.content:  # type: ignore[union-attr]
+                yield f"data: {json.dumps({'type': 'token', 'text': msg.content})}\n\n"  # type: ignore[union-attr]
 
     yield "data: [DONE]\n\n"
