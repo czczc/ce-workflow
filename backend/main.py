@@ -38,7 +38,7 @@ NO_CONTEXT_REPLY = "I don't have any relevant documents to answer that question.
 async def _stream_chat(message: str):
     yield f"data: {json.dumps({'type': 'loading'})}\n\n"
 
-    chunks = query(message)
+    chunks = query(message, top_k=settings.retrieval_top_k)
     context = "\n\n".join(c.text for c in chunks)
 
     sources = sorted({c.metadata.get("source", "") for c in chunks if c.metadata.get("source")})

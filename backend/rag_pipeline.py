@@ -57,7 +57,7 @@ def ingest(file: str | Path, options: dict[str, Any] | None = None) -> str:
     return doc_id
 
 
-def query(text: str, top_k: int = 5, min_score: float = 0.02) -> list[Chunk]:
+def query(text: str, top_k: int = 5, min_score: float = 0.0) -> list[Chunk]:
     vector = embed(text)
     store = DocumentStore()
     return store.hybrid_search(query_vector=vector, query_text=text, k=top_k, min_score=min_score)

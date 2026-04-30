@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     dense_collection: str = "ce_dense"
     sparse_collection: str = "ce_sparse"
+    retrieval_top_k: int = 10
 
     sqlite_db_path: str = "data/qc.db"
 
