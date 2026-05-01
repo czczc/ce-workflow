@@ -1,11 +1,8 @@
-import json
 import random
 from datetime import datetime, timezone
 from pathlib import Path
 
 import h5py
-
-from qc_analysis_agent import run_qc_analysis_agent
 
 N_CHANNELS = 32
 _BASELINE = 2048  # 12-bit ADC midpoint
@@ -53,22 +50,3 @@ def save_waveforms(waveform: dict) -> Path:
         for ch_data in waveform["channels"]:
             f.create_dataset(f"channel_{ch_data['channel']:02d}", data=ch_data["samples"])
     return run_dir
-
-
-async def run_daq_agent(n_samples: int = 2300):
-    yield f"data: {json.dumps({'type': 'token', 'text': '\n\n*DAQ Agent: Acquiring waveform data...*\n\n'})}\n\n"
-
-    waveform = generate_waveform_data(n_samples)
-    run_dir = save_waveforms(waveform)
-
-    summary = {
-        "n_channels": waveform["n_channels"],
-        "n_samples": waveform["n_samples"],
-        "channel_baselines": [ch["baseline"] for ch in waveform["channels"]],
-        "run_dir": str(run_dir),
-    }
-    yield f"data: {json.dumps({'type': 'tool_result', 'tool': 'daq_acquire', 'result': summary})}\n\n"
-    yield f"data: {json.dumps({'type': 'token', 'text': f'Acquired {N_CHANNELS}-channel ADC waveform ({n_samples} samples/channel). Saved to `{run_dir.name}`. Forwarding to QC Analysis Agent.\n'})}\n\n"
-
-    async for event in run_qc_analysis_agent(run_dir):
-        yield event

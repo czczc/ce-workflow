@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from catalog_agent import list_reports
 from config import settings
 from document_store import DocumentStore
-from monitor_agent import run_monitor_agent
+from pipeline import run_pipeline
 from rag_pipeline import ingest, query
 
 app = FastAPI()
@@ -112,7 +112,7 @@ async def hardware_anomaly_check():
 @app.post("/qc/start")
 async def qc_start():
     return StreamingResponse(
-        run_monitor_agent(),
+        run_pipeline(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

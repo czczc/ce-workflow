@@ -1,12 +1,5 @@
-import json
 import math
 from collections import Counter
-from pathlib import Path
-
-import h5py
-
-from catalog_agent import run_catalog_agent
-from diagnostic_agent import run_diagnostic_agent
 
 _EXPECTED_BASELINE = 2048
 _EXPECTED_NOISE_SIGMA = 15.0
@@ -34,70 +27,3 @@ def _check_signal_shape(samples: list[int], baseline: float) -> dict:
     outlier_count = sum(1 for s in samples if abs(s - baseline) > _OUTLIER_SIGMA * _EXPECTED_NOISE_SIGMA)
     ok = not stuck and (outlier_count / n < _OUTLIER_FRAC_LIMIT)
     return {"ok": ok, "stuck": stuck, "outlier_fraction": round(outlier_count / n, 4)}
-
-
-async def run_qc_analysis_agent(run_dir: Path):
-    yield f"data: {json.dumps({'type': 'token', 'text': '\n\n*QC Analysis Agent: Analyzing waveforms...*\n\n'})}\n\n"
-
-    channel_results = []
-    anomalies = []
-
-    with h5py.File(run_dir / "waveforms.h5", "r") as f:
-        for key in sorted(f.keys()):
-            ch_idx = int(key.split("_")[1])
-            samples = list(f[key][:])
-            baseline = sum(samples) / len(samples)
-
-            bl = _check_baseline(baseline)
-            nr = _check_noise_rms(samples, baseline)
-            ss = _check_signal_shape(samples, baseline)
-
-            issues = []
-            if not bl["ok"]:
-                issues.append("baseline_drift")
-            if not nr["ok"]:
-                issues.append("high_noise")
-            if ss["stuck"]:
-                issues.append("stuck_bit")
-            elif not ss["ok"]:
-                issues.append("shape_anomaly")
-
-            result = {
-                "channel": ch_idx,
-                "baseline": bl["baseline"],
-                "noise_rms": nr["rms"],
-                "outlier_fraction": ss["outlier_fraction"],
-                "issues": issues,
-            }
-            channel_results.append(result)
-            if issues:
-                anomalies.append(result)
-
-    findings = {
-        "run_dir": str(run_dir),
-        "n_channels": len(channel_results),
-        "n_anomalous": len(anomalies),
-        "anomalies": anomalies,
-    }
-    yield f"data: {json.dumps({'type': 'tool_result', 'tool': 'qc_analysis', 'result': findings})}\n\n"
-
-    if anomalies:
-        lines = [f"**QC Analysis complete.** {len(anomalies)}/{len(channel_results)} channels flagged:\n"]
-        for a in anomalies:
-            lines.append(f"- Channel {a['channel']:02d}: {', '.join(a['issues'])}")
-        lines.append("\nForwarding findings to Diagnostic Agent.")
-        text = "\n".join(lines) + "\n"
-    else:
-        text = (
-            f"**QC Analysis complete.** All {len(channel_results)} channels passed. "
-            "No anomalies detected.\n"
-        )
-
-    yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
-
-    if anomalies:
-        async for event in run_diagnostic_agent(findings):
-            yield event
-
-    async for event in run_catalog_agent(findings):
-        yield event

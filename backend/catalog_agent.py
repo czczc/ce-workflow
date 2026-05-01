@@ -1,6 +1,4 @@
-import json
 import sqlite3
-from datetime import datetime, timezone
 from pathlib import Path
 
 from config import settings
@@ -59,28 +57,3 @@ def list_reports() -> list[dict]:
     """).fetchall()
     conn.close()
     return [dict(row) for row in rows]
-
-
-async def run_catalog_agent(findings: dict):
-    yield f"data: {json.dumps({'type': 'token', 'text': '\n\n*Catalog & Report Agent: Writing QC report...*\n\n'})}\n\n"
-
-    summary = _build_summary(findings)
-
-    conn = _connect()
-    cur = conn.execute(
-        "INSERT INTO qc_runs (run_dir, timestamp, passed, n_channels, n_anomalous) VALUES (?, ?, ?, ?, ?)",
-        (
-            findings["run_dir"],
-            datetime.now(timezone.utc).isoformat(),
-            0 if findings["n_anomalous"] else 1,
-            findings["n_channels"],
-            findings["n_anomalous"],
-        ),
-    )
-    run_id = cur.lastrowid
-    conn.execute("INSERT INTO reports (run_id, summary) VALUES (?, ?)", (run_id, summary))
-    conn.commit()
-    conn.close()
-
-    yield f"data: {json.dumps({'type': 'tool_result', 'tool': 'catalog_write', 'result': {'run_id': run_id, 'passed': findings['n_anomalous'] == 0}})}\n\n"
-    yield f"data: {json.dumps({'type': 'token', 'text': summary + chr(10)})}\n\n"
