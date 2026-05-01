@@ -102,21 +102,21 @@ graph = _builder.compile()
 async def run_diagnostic_agent(findings: dict):
     yield f"data: {json.dumps({'type': 'token', 'text': '\n\n*Diagnostic Agent: Analyzing findings...*\n\n'})}\n\n"
 
-    async for mode, data in graph.astream(
+    async for mode, data in graph.astream(  # type: ignore[misc]
         {"findings": findings, "rag_chunks": [], "rag_context": "", "diagnosis": [], "response": ""},
         stream_mode=["messages", "updates"],
     ):
-        if mode == "updates":
-            if "retrieve_context" in data:
-                chunks = data["retrieve_context"].get("rag_chunks", [])
+        if mode == "updates":  # type: ignore[operator]
+            if "retrieve_context" in data:  # type: ignore[operator]
+                chunks = data["retrieve_context"].get("rag_chunks", [])  # type: ignore[index]
                 if chunks:
                     sources = sorted({c["source"] for c in chunks if c.get("source")})
                     yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
                     yield f"data: {json.dumps({'type': 'retrieval', 'chunks': chunks})}\n\n"
-            elif "build_diagnosis" in data:
-                diagnosis = data["build_diagnosis"].get("diagnosis", [])
+            elif "build_diagnosis" in data:  # type: ignore[operator]
+                diagnosis = data["build_diagnosis"].get("diagnosis", [])  # type: ignore[index]
                 yield f"data: {json.dumps({'type': 'tool_result', 'tool': 'qc_diagnosis', 'result': diagnosis})}\n\n"
         elif mode == "messages":
-            msg, _ = data
-            if msg.content:
-                yield f"data: {json.dumps({'type': 'token', 'text': msg.content})}\n\n"
+            msg, _ = data  # type: ignore[misc]
+            if msg.content:  # type: ignore[union-attr]
+                yield f"data: {json.dumps({'type': 'token', 'text': msg.content})}\n\n"  # type: ignore[union-attr]
