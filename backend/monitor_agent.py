@@ -7,6 +7,7 @@ from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
 
 from config import settings
+from daq_agent import run_daq_agent
 
 MONITOR_SYSTEM_PROMPT = (
     "You are the Monitor Agent in a cold electronics QA/QC workflow. "
@@ -65,16 +66,23 @@ graph = _builder.compile()
 async def run_monitor_agent():
     yield f"data: {json.dumps({'type': 'token', 'text': '*Checking hardware status...*\n\n'})}\n\n"
 
+    hardware_status = None
+
     async for mode, data in graph.astream(  # type: ignore[misc]
         {"hardware_result": {}, "response": ""},
         stream_mode=["messages", "updates"],
     ):
         if mode == "updates" and "check_hardware" in data:  # type: ignore[operator]
             result = data["check_hardware"].get("hardware_result", {})  # type: ignore[index]
+            hardware_status = result.get("status")
             yield f"data: {json.dumps({'type': 'tool_result', 'tool': 'hardware_anomaly_check', 'result': result})}\n\n"
         elif mode == "messages":
             msg, _ = data  # type: ignore[misc]
             if msg.content:  # type: ignore[union-attr]
                 yield f"data: {json.dumps({'type': 'token', 'text': msg.content})}\n\n"  # type: ignore[union-attr]
+
+    if hardware_status == "good":
+        async for event in run_daq_agent():
+            yield event
 
     yield "data: [DONE]\n\n"

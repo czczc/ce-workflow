@@ -1,8 +1,8 @@
 # Context Map
 
-This is a multi-context repo. Each sub-directory has its own `CONTEXT.md` and `docs/adr/`.
+This is a multi-context repo. Each sub-directory has its own `CONTEXT.md`.
 
 | Context | Path | Stack |
 |---|---|---|
-| Frontend | `frontend/CONTEXT.md` | Vue 3 |
-| Backend | `backend/CONTEXT.md` | Agno (agent orchestration), Qdrant (vector DB) |
+| Frontend | `frontend/CONTEXT.md` | Vue 3, Vuetify 3, Vite |
+| Backend | `backend/CONTEXT.md` | FastAPI, LangGraph, Ollama, Qdrant, h5py |
