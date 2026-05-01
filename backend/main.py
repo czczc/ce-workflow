@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from catalog_agent import list_reports
 from config import settings
 from document_store import DocumentStore
 from monitor_agent import run_monitor_agent
@@ -137,6 +138,11 @@ async def upload_document(
         tmp_path.unlink(missing_ok=True)
 
     return {"doc_id": doc_id}
+
+
+@app.get("/reports")
+async def get_reports():
+    return list_reports()
 
 
 @app.get("/documents")

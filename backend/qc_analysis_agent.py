@@ -5,6 +5,7 @@ from pathlib import Path
 
 import h5py
 
+from catalog_agent import run_catalog_agent
 from diagnostic_agent import run_diagnostic_agent
 
 _EXPECTED_BASELINE = 2048
@@ -97,3 +98,6 @@ async def run_qc_analysis_agent(run_dir: Path):
     if anomalies:
         async for event in run_diagnostic_agent(findings):
             yield event
+
+    async for event in run_catalog_agent(findings):
+        yield event

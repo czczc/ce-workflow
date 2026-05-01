@@ -10,7 +10,7 @@ from qc_analysis_agent import run_qc_analysis_agent
 N_CHANNELS = 32
 _BASELINE = 2048  # 12-bit ADC midpoint
 _NOISE_SIGMA = 15.0
-_DATA_DIR = Path(__file__).parent / "data"
+_DATA_DIR = Path(__file__).parent / "data" / "daq"
 
 
 def _inject_anomaly(samples: list[int], baseline: float, kind: str) -> list[int]:
