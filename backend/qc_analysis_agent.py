@@ -5,6 +5,8 @@ from pathlib import Path
 
 import h5py
 
+from diagnostic_agent import run_diagnostic_agent
+
 _EXPECTED_BASELINE = 2048
 _EXPECTED_NOISE_SIGMA = 15.0
 _BASELINE_TOLERANCE = 30      # ±30 ADC counts from midpoint
@@ -91,3 +93,7 @@ async def run_qc_analysis_agent(run_dir: Path):
         )
 
     yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+
+    if anomalies:
+        async for event in run_diagnostic_agent(findings):
+            yield event
