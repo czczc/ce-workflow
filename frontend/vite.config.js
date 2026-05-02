@@ -9,10 +9,19 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      '/chat': 'http://127.0.0.1:8000',
-      '/documents': 'http://127.0.0.1:8000',
+      '/chat': {
+        target: 'http://127.0.0.1:8000',
+        bypass: (req) => req.headers.accept?.includes('text/html') ? '/index.html' : null,
+      },
+      '/documents': {
+        target: 'http://127.0.0.1:8000',
+        bypass: (req) => req.headers.accept?.includes('text/html') ? '/index.html' : null,
+      },
       '/qc': 'http://127.0.0.1:8000',
-      '/reports': 'http://127.0.0.1:8000',
+      '/reports': {
+        target: 'http://127.0.0.1:8000',
+        bypass: (req) => req.headers.accept?.includes('text/html') ? '/index.html' : null,
+      },
     },
   },
 })
