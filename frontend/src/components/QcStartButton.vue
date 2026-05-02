@@ -17,7 +17,7 @@ import { ref } from 'vue'
 import { useChat } from '../composables/useChat.js'
 
 const API = ''
-const { messages, streaming } = useChat()
+const { messages, streaming, activeNode, completedNodes } = useChat()
 const running = ref(false)
 
 async function startQc() {
@@ -25,6 +25,8 @@ async function startQc() {
 
   running.value = true
   streaming.value = true
+  activeNode.value = null
+  completedNodes.value = new Set()
   messages.value.push({ role: 'agent', text: '', sources: [], retrieval: [] })
   const idx = messages.value.length - 1
 
@@ -48,12 +50,27 @@ async function startQc() {
         const evt = JSON.parse(data)
         if (evt.type === 'token') {
           messages.value[idx].text += evt.text
+        } else if (evt.type === 'node_active') {
+          if (activeNode.value) completedNodes.value.add(activeNode.value)
+          activeNode.value = evt.node
+          completedNodes.value = new Set(completedNodes.value)
+        } else if (evt.type === 'node_done') {
+          if (activeNode.value) {
+            completedNodes.value.add(activeNode.value)
+            completedNodes.value = new Set(completedNodes.value)
+          }
+          activeNode.value = null
         }
       }
     }
   } catch (err) {
     messages.value[idx].text = `Error: ${err.message}`
   } finally {
+    if (activeNode.value) {
+      completedNodes.value.add(activeNode.value)
+      completedNodes.value = new Set(completedNodes.value)
+      activeNode.value = null
+    }
     running.value = false
     streaming.value = false
   }
