@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     dense_collection: str = "ce_dense"
     sparse_collection: str = "ce_sparse"
     retrieval_top_k: int = 10
+    reranker_enabled: bool = False
+    generation_top_k: int = 3
 
     sqlite_db_path: str = "data/qc.db"
 

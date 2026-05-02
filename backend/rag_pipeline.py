@@ -1,10 +1,18 @@
 import uuid
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from document_store import Chunk, DocumentStore
 from embedding import embed
+from config import settings
+
+
+@lru_cache(maxsize=1)
+def _reranker():
+    from sentence_transformers import CrossEncoder
+    return CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
 
 def _read_text(path: Path) -> str:
@@ -60,4 +68,13 @@ def ingest(file: str | Path, options: dict[str, Any] | None = None) -> str:
 def query(text: str, top_k: int = 5, min_score: float = 0.0) -> list[Chunk]:
     vector = embed(text)
     store = DocumentStore()
-    return store.hybrid_search(query_vector=vector, query_text=text, k=top_k, min_score=min_score)
+    if not settings.reranker_enabled:
+        return store.hybrid_search(query_vector=vector, query_text=text, k=top_k, min_score=min_score)
+
+    chunks = store.hybrid_search(query_vector=vector, query_text=text, k=settings.retrieval_top_k, min_score=min_score)
+    if not chunks:
+        return chunks
+    pairs = [[text, c.text] for c in chunks]
+    scores = _reranker().predict(pairs)
+    ranked = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
+    return [c for _, c in ranked[: settings.generation_top_k]]
