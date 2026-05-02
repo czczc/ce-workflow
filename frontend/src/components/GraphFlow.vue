@@ -31,9 +31,9 @@ import { useChat } from '../composables/useChat.js'
 
 const { activeNode, completedNodes } = useChat()
 
-const NODE_W = 300
-const NODE_H = 54
-const NODE_TOP_OFFSET = 24
+const NODE_W = 240
+const NODE_H = 40
+const NODE_TOP_OFFSET = 0
 
 function layoutNodes(nodes, edges) {
   const g = new dagre.graphlib.Graph()
@@ -89,13 +89,13 @@ const flowEdges = graphEdges.map(e => ({
 }
 
 .graph-node {
-  width: 300px;
-  height: 54px;
+  width: 240px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  font-size: 23px;
+  font-size: 22px;
   font-weight: 500;
   letter-spacing: 0.04em;
   border: 1px solid rgba(0,0,0,0.15);
