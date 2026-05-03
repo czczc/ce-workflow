@@ -4,12 +4,12 @@ import tempfile
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, File, Form, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from catalog_agent import list_reports
+from catalog_agent import get_report, list_reports
 from config import settings
 from document_store import DocumentStore
 from pipeline import run_pipeline
@@ -141,8 +141,16 @@ async def upload_document(
 
 
 @app.get("/reports")
-async def get_reports():
-    return list_reports()
+async def get_reports(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100)):
+    return list_reports(page=page, limit=limit)
+
+
+@app.get("/reports/{report_id}")
+async def get_report_detail(report_id: int):
+    report = get_report(report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return report
 
 
 @app.get("/documents")

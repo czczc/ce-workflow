@@ -10,80 +10,78 @@
       <div v-if="loading" class="d-flex justify-center py-8">
         <v-progress-circular indeterminate />
       </div>
-      <div v-else-if="!reports.length" class="text-center text-medium-emphasis py-8">
+      <div v-else-if="!items.length" class="text-center text-medium-emphasis py-8">
         No reports yet. Run a QC scan to generate one.
       </div>
-      <v-list v-else lines="two">
-        <template v-for="(r, i) in reports" :key="r.id">
-          <v-list-item style="cursor: pointer" @click="toggle(i)">
-            <template #prepend>
-              <v-chip :color="r.passed ? 'success' : 'error'" size="small" class="mr-3">
-                {{ r.passed ? 'PASS' : 'FAIL' }}
-              </v-chip>
-            </template>
-            <v-list-item-title>Run #{{ r.id }} — {{ formatTime(r.timestamp) }}</v-list-item-title>
-            <v-list-item-subtitle>
-              {{ r.n_anomalous }} / {{ r.n_channels }} channels anomalous &nbsp;·&nbsp;
-              <span class="text-mono">{{ runName(r.run_dir) }}</span>
-            </v-list-item-subtitle>
-            <template #append>
-              <v-icon>{{ expanded === i ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
-            </template>
-          </v-list-item>
-          <v-expand-transition>
-            <div v-if="expanded === i" class="px-4 pb-3">
-              <v-card variant="tonal" class="pa-3 report-summary">
-                <div v-html="render(r.summary)" />
-              </v-card>
-            </div>
-          </v-expand-transition>
-          <v-divider v-if="i < reports.length - 1" />
-        </template>
-      </v-list>
+      <template v-else>
+        <v-table hover>
+          <thead>
+            <tr>
+              <th>Run ID</th>
+              <th>Timestamp</th>
+              <th>Status</th>
+              <th>Channels</th>
+              <th>Anomalous</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="r in items"
+              :key="r.id"
+              style="cursor: pointer"
+              @click="$router.push('/reports/' + r.id)"
+            >
+              <td>#{{ r.id }}</td>
+              <td>{{ formatTime(r.timestamp) }}</td>
+              <td>
+                <v-chip :color="r.passed ? 'success' : 'error'" size="small">
+                  {{ r.passed ? 'PASS' : 'FAIL' }}
+                </v-chip>
+              </td>
+              <td>{{ r.n_channels }}</td>
+              <td>{{ r.n_anomalous }}</td>
+            </tr>
+          </tbody>
+        </v-table>
+        <div class="d-flex justify-center mt-4">
+          <v-pagination
+            v-model="page"
+            :length="totalPages"
+            :total-visible="7"
+            @update:model-value="load"
+          />
+        </div>
+      </template>
     </v-card-text>
   </v-card>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { marked } from 'marked'
+import { computed, onMounted, ref } from 'vue'
 
-const reports = ref([])
+const items = ref([])
+const total = ref(0)
+const page = ref(1)
 const loading = ref(false)
-const expanded = ref(null)
+const LIMIT = 20
+
+const totalPages = computed(() => Math.ceil(total.value / LIMIT))
 
 async function load() {
   loading.value = true
   try {
-    const res = await fetch('/reports')
-    reports.value = await res.json()
+    const res = await fetch(`/reports?page=${page.value}&limit=${LIMIT}`)
+    const data = await res.json()
+    items.value = data.items
+    total.value = data.total
   } finally {
     loading.value = false
   }
-}
-
-function toggle(i) {
-  expanded.value = expanded.value === i ? null : i
 }
 
 function formatTime(iso) {
   return new Date(iso).toLocaleString()
 }
 
-function runName(runDir) {
-  return runDir.split('/').pop()
-}
-
-function render(text) {
-  return text ? marked.parse(text) : ''
-}
-
 onMounted(load)
 </script>
-
-<style scoped>
-.text-mono { font-family: monospace; font-size: 0.85em; }
-.report-summary :deep(p)  { margin: 0 0 4px; }
-.report-summary :deep(ul) { padding-left: 1.4em; margin: 4px 0; }
-.report-summary :deep(li) { margin-bottom: 2px; }
-</style>

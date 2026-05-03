@@ -47,13 +47,28 @@ def _build_summary(findings: dict) -> str:
     return "\n".join(lines)
 
 
-def list_reports() -> list[dict]:
+_REPORT_QUERY = """
+    SELECT r.id, r.run_dir, r.timestamp, r.passed, r.n_channels, r.n_anomalous, rp.summary
+    FROM qc_runs r
+    LEFT JOIN reports rp ON rp.run_id = r.id
+"""
+
+
+def list_reports(page: int = 1, limit: int = 20) -> dict:
     conn = _connect()
-    rows = conn.execute("""
-        SELECT r.id, r.run_dir, r.timestamp, r.passed, r.n_channels, r.n_anomalous, rp.summary
-        FROM qc_runs r
-        LEFT JOIN reports rp ON rp.run_id = r.id
-        ORDER BY r.timestamp DESC
-    """).fetchall()
+    total = conn.execute("SELECT COUNT(*) FROM qc_runs").fetchone()[0]
+    rows = conn.execute(
+        _REPORT_QUERY + "ORDER BY r.timestamp DESC LIMIT ? OFFSET ?",
+        (limit, (page - 1) * limit),
+    ).fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    return {"items": [dict(row) for row in rows], "total": total}
+
+
+def get_report(report_id: int) -> dict | None:
+    conn = _connect()
+    row = conn.execute(
+        _REPORT_QUERY + "WHERE r.id = ?", (report_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
