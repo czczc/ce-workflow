@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
 
-from catalog_agent import _build_summary, _connect
+from catalog_agent import _build_summary, _connect, fetch_component_history
 from config import settings
 from daq_agent import N_CHANNELS, generate_waveform_data, save_waveforms
 from diagnostic_agent import _SUGGESTED_ACTIONS, _SYSTEM_PROMPT as _DIAG_PROMPT
@@ -41,6 +41,8 @@ class PipelineState(TypedDict):
     passed: bool
     summary: str
     inject_anomalies: bool
+    component_id: str
+    mcp_warning: str
 
 
 # ── nodes ────────────────────────────────────────────────────────────────────
@@ -174,7 +176,13 @@ async def narrate(state: PipelineState) -> dict:
 
 async def catalog_write(state: PipelineState) -> dict:
     findings = state["findings"]
-    summary = _build_summary(findings)
+    component_history = None
+    mcp_warning = ""
+    if state.get("component_id"):
+        component_history = await fetch_component_history(state["component_id"], settings.django_mcp_url)
+        if component_history is None:
+            mcp_warning = f"Django DB MCP server unreachable ({settings.django_mcp_url}); report written without component history."
+    summary = _build_summary(findings, component_history)
     conn = _connect()
     cur = conn.execute(
         "INSERT INTO qc_runs (run_dir, timestamp, passed, n_channels, n_anomalous) VALUES (?, ?, ?, ?, ?)",
@@ -190,7 +198,7 @@ async def catalog_write(state: PipelineState) -> dict:
     conn.execute("INSERT INTO reports (run_id, summary) VALUES (?, ?)", (run_id, summary))
     conn.commit()
     conn.close()
-    return {"run_id": run_id, "passed": findings["n_anomalous"] == 0, "summary": summary}
+    return {"run_id": run_id, "passed": findings["n_anomalous"] == 0, "summary": summary, "mcp_warning": mcp_warning}
 
 
 # ── routing ───────────────────────────────────────────────────────────────────
@@ -235,7 +243,8 @@ _INITIAL_STATE: PipelineState = {
     "findings": {},
     "inject_anomalies": True,
     "rag_chunks": [], "rag_context": "", "diagnosis": [],
-    "run_id": 0, "passed": False, "summary": "",
+    "run_id": 0, "passed": False, "summary": "", "mcp_warning": "",
+    "component_id": "",
 }
 
 
@@ -243,12 +252,12 @@ def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
-async def run_pipeline(test: bool = False):
+async def run_pipeline(test: bool = False, component_id: str = ""):
     yield _sse({"type": "node_active", "node": "check_hardware"})
     yield _sse({"type": "token", "text": "*Monitor Agent: Checking hardware status...*\n\n"})
 
     hardware_status = None
-    initial_state = {**_INITIAL_STATE, "inject_anomalies": test}
+    initial_state = {**_INITIAL_STATE, "inject_anomalies": test, "component_id": component_id}
 
     async for mode, data in graph.astream(  # type: ignore[misc]
         initial_state,
@@ -308,6 +317,8 @@ async def run_pipeline(test: bool = False):
             elif node == "catalog_write":
                 yield _sse({"type": "node_active", "node": "catalog_write"})
                 yield _sse({"type": "token", "text": "\n\n*Catalog & Report Agent: Writing QC report...*\n\n"})
+                if update.get("mcp_warning"):  # type: ignore[union-attr]
+                    yield _sse({"type": "token", "text": f"> ⚠ {update['mcp_warning']}\n\n"})  # type: ignore[index]
                 yield _sse({"type": "tool_result", "tool": "catalog_write", "result": {"run_id": update.get("run_id"), "passed": update.get("passed")}})  # type: ignore[union-attr]
                 yield _sse({"type": "token", "text": str(update.get("summary", "")) + "\n"})  # type: ignore[union-attr]
 

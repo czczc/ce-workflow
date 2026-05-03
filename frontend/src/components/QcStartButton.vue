@@ -1,20 +1,32 @@
 <template>
   <v-card class="mt-2">
-    <v-card-text class="d-flex gap-2">
-      <v-btn
-        class="flex-grow-1"
-        color="secondary"
-        :loading="runningNormal"
+    <v-card-text class="d-flex flex-column gap-2">
+      <v-text-field
+        v-model="componentId"
+        label="FEMB Serial Number (optional)"
+        placeholder="e.g. 00030"
+        density="compact"
+        variant="outlined"
+        hide-details
+        clearable
         :disabled="anyRunning || streaming"
-        @click="startQc(false)"
-      >QC Start</v-btn>
-      <v-btn
-        class="flex-grow-1"
-        color="warning"
-        :loading="runningTest"
-        :disabled="anyRunning || streaming"
-        @click="startQc(true)"
-      >QC Start (Test)</v-btn>
+      />
+      <div class="d-flex gap-2">
+        <v-btn
+          class="flex-grow-1"
+          color="secondary"
+          :loading="runningNormal"
+          :disabled="anyRunning || streaming"
+          @click="startQc(false)"
+        >QC Start</v-btn>
+        <v-btn
+          class="flex-grow-1"
+          color="warning"
+          :loading="runningTest"
+          :disabled="anyRunning || streaming"
+          @click="startQc(true)"
+        >QC Start (Test)</v-btn>
+      </div>
     </v-card-text>
   </v-card>
 </template>
@@ -28,6 +40,7 @@ const { messages, streaming, activeNode, completedNodes } = useChat()
 const runningNormal = ref(false)
 const runningTest = ref(false)
 const anyRunning = computed(() => runningNormal.value || runningTest.value)
+const componentId = ref('')
 
 async function startQc(test) {
   if (anyRunning.value || streaming.value) return
@@ -41,7 +54,10 @@ async function startQc(test) {
   const idx = messages.value.length - 1
 
   try {
-    const url = test ? `${API}/qc/start?test=true` : `${API}/qc/start`
+    const params = new URLSearchParams()
+    if (test) params.set('test', 'true')
+    if (componentId.value) params.set('component_id', componentId.value.trim())
+    const url = `${API}/qc/start${params.size ? '?' + params : ''}`
     const resp = await fetch(url, { method: 'POST' })
     const reader = resp.body.getReader()
     const decoder = new TextDecoder()

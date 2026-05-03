@@ -113,9 +113,9 @@ async def hardware_anomaly_check():
 
 
 @app.post("/qc/start")
-async def qc_start(test: bool = Query(False)):
+async def qc_start(test: bool = Query(False), component_id: str = Query("")):
     return StreamingResponse(
-        run_pipeline(test=test),
+        run_pipeline(test=test, component_id=component_id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

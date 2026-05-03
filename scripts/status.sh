@@ -29,5 +29,6 @@ echo "────────────────────────�
 check "ollama"   localhost 11434 "ollama serve"
 check "qdrant"   localhost 6333  "cd ${REPO_ROOT}/docker && docker compose up -d"
 check "backend"  127.0.0.1 8000  "cd ${REPO_ROOT}/backend && uv run uvicorn main:app"
+check "mcp-db"   127.0.0.1 8001  "cd ${REPO_ROOT}/backend && uv run python mcp_django_db.py"
 check "frontend" localhost 5173  "cd ${REPO_ROOT}/frontend && npm run dev"
 echo ""

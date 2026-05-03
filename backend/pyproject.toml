@@ -10,6 +10,7 @@ dependencies = [
     "httpx>=0.28.1",
     "langchain-ollama>=1.1.0",
     "langgraph>=1.1.10",
+    "mcp>=1.3.0",
     "pydantic-settings>=2.14.0",
     "pypdf>=6.10.2",
     "pytest>=9.0.3",
