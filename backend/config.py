@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 10
     reranker_enabled: bool = False
     generation_top_k: int = 3
+    history_turns: int = 6
 
     sqlite_db_path: str = "data/qc.db"
 

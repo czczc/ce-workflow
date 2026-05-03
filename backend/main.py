@@ -27,6 +27,7 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     message: str
+    history: list[dict] = []
 
 
 SYSTEM_PROMPT = (
@@ -38,7 +39,7 @@ SYSTEM_PROMPT = (
 NO_CONTEXT_REPLY = "I don't have any relevant documents to answer that question."
 
 
-async def _stream_chat(message: str):
+async def _stream_chat(message: str, history: list[dict] = []):
     yield f"data: {json.dumps({'type': 'loading'})}\n\n"
 
     chunks = query(message, top_k=settings.retrieval_top_k)
@@ -67,8 +68,10 @@ async def _stream_chat(message: str):
         yield "data: [DONE]\n\n"
         return
 
+    prior = history[-settings.history_turns :]
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
+        *prior,
         {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {message}"},
     ]
 
@@ -95,7 +98,7 @@ async def _stream_chat(message: str):
 @app.post("/chat/stream")
 async def chat_stream(body: ChatRequest):
     return StreamingResponse(
-        _stream_chat(body.message),
+        _stream_chat(body.message, body.history),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

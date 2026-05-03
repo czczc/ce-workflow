@@ -86,6 +86,10 @@ async function send() {
   if (!text || streaming.value) return
 
   input.value = ''
+  const history = messages.value.slice(-6).map((m) => ({
+    role: m.role === 'user' ? 'user' : 'assistant',
+    content: m.text,
+  }))
   messages.value.push({ role: 'user', text })
   scrollToBottom()
 
@@ -97,7 +101,7 @@ async function send() {
     const resp = await fetch(`${API}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text }),
+      body: JSON.stringify({ message: text, history }),
     })
 
     const reader = resp.body.getReader()
