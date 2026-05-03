@@ -9,7 +9,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from document_store import Chunk
-from main import NO_CONTEXT_REPLY, app
+from main import app
 
 client = TestClient(app)
 
@@ -48,8 +48,11 @@ class _FakeHttpxClientCtx:
 
 # --- tests ---
 
-def test_chat_stream_no_context_returns_static_reply():
-    with patch("main.query", return_value=[]):
+def test_chat_stream_no_context_still_calls_model():
+    with (
+        patch("main.query", return_value=[]),
+        patch("httpx.AsyncClient", return_value=_FakeHttpxClientCtx()),
+    ):
         resp = client.post("/chat/stream", json={"message": "what is cold electronics?"})
 
     assert resp.status_code == 200
@@ -57,8 +60,9 @@ def test_chat_stream_no_context_returns_static_reply():
     payloads = [e[len("data: "):] for e in events]
 
     assert json.loads(payloads[0]) == {"type": "loading"}
-    assert json.loads(payloads[1]) == {"type": "token", "text": NO_CONTEXT_REPLY}
-    assert payloads[2] == "[DONE]"
+    assert json.loads(payloads[1]) == {"type": "token", "text": "hello"}
+    assert json.loads(payloads[2]) == {"type": "token", "text": " world"}
+    assert payloads[3] == "[DONE]"
 
 
 def test_chat_stream_emits_loading_then_tokens():

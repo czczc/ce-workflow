@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from catalog_agent import get_report, list_reports
+from catalog_agent import call_mcp_tool, get_report, list_reports
 from config import settings
 from document_store import DocumentStore
 from pipeline import run_pipeline
@@ -30,13 +30,48 @@ class ChatRequest(BaseModel):
     history: list[dict] = []
 
 
-SYSTEM_PROMPT = (
-    "Answer only using the provided context. "
-    "If the answer isn't in the context, say so explicitly. "
-    "Do not use outside knowledge."
+_SYSTEM_PROMPT = (
+    "You are a cold electronics QC assistant. "
+    "Use the provided document context when relevant. "
+    "Use the available tools to query the component database when asked about FEMBs, components, or test history. "
+    "If neither context nor tools can answer, say so."
 )
 
-NO_CONTEXT_REPLY = "I don't have any relevant documents to answer that question."
+_CHAT_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "list_fembs",
+            "description": "List FEMBs from the component database, ordered by most recently updated.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of FEMBs to return (default 20).",
+                    }
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_femb",
+            "description": "Return metadata and full test history for a FEMB by serial number.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "serial_number": {
+                        "type": "string",
+                        "description": "FEMB serial number, e.g. '00030'.",
+                    }
+                },
+                "required": ["serial_number"],
+            },
+        },
+    },
+]
 
 
 async def _stream_chat(message: str, history: list[dict] = []):
@@ -63,22 +98,56 @@ async def _stream_chat(message: str, history: list[dict] = []):
         ]
         yield f"data: {json.dumps({'type': 'retrieval', 'chunks': retrieval})}\n\n"
 
-    if not context:
-        yield f"data: {json.dumps({'type': 'token', 'text': NO_CONTEXT_REPLY})}\n\n"
-        yield "data: [DONE]\n\n"
-        return
-
     prior = history[-settings.history_turns :]
+    user_content = f"Context:\n{context}\n\nQuestion: {message}" if context else message
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": _SYSTEM_PROMPT},
         *prior,
-        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {message}"},
+        {"role": "user", "content": user_content},
     ]
 
+    ollama_url = f"{settings.ollama_base_url}/api/chat"
+
     async with httpx.AsyncClient(timeout=120.0) as client:
+        # Phase 1: stream with tools — content tokens flow through; tool_calls are collected
+        tool_calls = []
         async with client.stream(
             "POST",
-            f"{settings.ollama_base_url}/api/chat",
+            ollama_url,
+            json={"model": settings.reasoning_model, "messages": messages, "tools": _CHAT_TOOLS, "stream": True, "think": False},
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line:
+                    continue
+                data = json.loads(line)
+                msg = data.get("message", {})
+                if msg.get("tool_calls"):
+                    tool_calls = msg["tool_calls"]
+                elif msg.get("content"):
+                    yield f"data: {json.dumps({'type': 'token', 'text': msg['content']})}\n\n"
+                if data.get("done"):
+                    break
+
+        if not tool_calls:
+            yield "data: [DONE]\n\n"
+            return
+
+        # Phase 2: execute each tool via MCP
+        messages.append({"role": "assistant", "content": "", "tool_calls": tool_calls})
+        for tc in tool_calls:
+            name = tc["function"]["name"]
+            args = tc["function"]["arguments"]
+            if isinstance(args, str):
+                args = json.loads(args)
+            result = await call_mcp_tool(name, args, settings.django_mcp_url)
+            yield f"data: {json.dumps({'type': 'tool_result', 'tool': name, 'result': result or {}})}\n\n"
+            messages.append({"role": "tool", "content": json.dumps(result)})
+
+        # Phase 3: stream final answer with tool results in context
+        async with client.stream(
+            "POST",
+            ollama_url,
             json={"model": settings.reasoning_model, "messages": messages, "stream": True, "think": False},
         ) as resp:
             resp.raise_for_status()

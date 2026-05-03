@@ -69,8 +69,8 @@ def _build_summary(findings: dict, component_history: dict | None = None) -> str
     return "\n".join(lines)
 
 
-async def fetch_component_history(serial_number: str, mcp_url: str) -> dict | None:
-    """Query the Django DB MCP server for FEMB history. Returns None if unreachable."""
+async def call_mcp_tool(name: str, arguments: dict, mcp_url: str):
+    """Call any tool on the Django DB MCP server. Returns None if unreachable."""
     try:
         from mcp import ClientSession
         from mcp.client.streamable_http import streamablehttp_client
@@ -78,12 +78,17 @@ async def fetch_component_history(serial_number: str, mcp_url: str) -> dict | No
         async with streamablehttp_client(mcp_url) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                result = await session.call_tool("get_femb", {"serial_number": serial_number})
+                result = await session.call_tool(name, arguments)
                 if result.content and result.content[0].type == "text":
                     return json.loads(result.content[0].text)
     except Exception:
         pass
     return None
+
+
+async def fetch_component_history(serial_number: str, mcp_url: str) -> dict | None:
+    """Query the Django DB MCP server for FEMB history. Returns None if unreachable."""
+    return await call_mcp_tool("get_femb", {"serial_number": serial_number}, mcp_url)
 
 
 _REPORT_QUERY = """
