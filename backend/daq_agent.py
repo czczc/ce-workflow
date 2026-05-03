@@ -27,11 +27,13 @@ def _inject_anomaly(samples: list[int], baseline: float, kind: str) -> list[int]
     return samples
 
 
-def generate_waveform_data(n_samples: int = 2300) -> dict:
-    anomaly_kinds = ["baseline_drift", "high_noise", "stuck_bit", "shape_anomaly"]
-    n_anomalous = random.randint(2, 5)
-    anomalous_channels = random.sample(range(N_CHANNELS), n_anomalous)
-    anomaly_map = {ch: random.choice(anomaly_kinds) for ch in anomalous_channels}
+def generate_waveform_data(n_samples: int = 2300, inject_anomalies: bool = True) -> dict:
+    anomaly_map: dict[int, str] = {}
+    if inject_anomalies:
+        anomaly_kinds = ["baseline_drift", "high_noise", "stuck_bit", "shape_anomaly"]
+        n_anomalous = random.randint(2, 5)
+        anomalous_channels = random.sample(range(N_CHANNELS), n_anomalous)
+        anomaly_map = {ch: random.choice(anomaly_kinds) for ch in anomalous_channels}
 
     channels = []
     for ch in range(N_CHANNELS):

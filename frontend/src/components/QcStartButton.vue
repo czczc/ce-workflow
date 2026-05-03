@@ -1,29 +1,39 @@
 <template>
   <v-card class="mt-2">
-    <v-card-text>
+    <v-card-text class="d-flex gap-2">
       <v-btn
-        block
+        class="flex-grow-1"
         color="secondary"
-        :loading="running"
-        :disabled="streaming"
-        @click="startQc"
+        :loading="runningNormal"
+        :disabled="anyRunning || streaming"
+        @click="startQc(false)"
       >QC Start</v-btn>
+      <v-btn
+        class="flex-grow-1"
+        color="warning"
+        :loading="runningTest"
+        :disabled="anyRunning || streaming"
+        @click="startQc(true)"
+      >QC Start (Test)</v-btn>
     </v-card-text>
   </v-card>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useChat } from '../composables/useChat.js'
 
 const API = ''
 const { messages, streaming, activeNode, completedNodes } = useChat()
-const running = ref(false)
+const runningNormal = ref(false)
+const runningTest = ref(false)
+const anyRunning = computed(() => runningNormal.value || runningTest.value)
 
-async function startQc() {
-  if (running.value || streaming.value) return
+async function startQc(test) {
+  if (anyRunning.value || streaming.value) return
 
-  running.value = true
+  if (test) runningTest.value = true
+  else runningNormal.value = true
   streaming.value = true
   activeNode.value = null
   completedNodes.value = new Set()
@@ -31,7 +41,8 @@ async function startQc() {
   const idx = messages.value.length - 1
 
   try {
-    const resp = await fetch(`${API}/qc/start`, { method: 'POST' })
+    const url = test ? `${API}/qc/start?test=true` : `${API}/qc/start`
+    const resp = await fetch(url, { method: 'POST' })
     const reader = resp.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
@@ -71,7 +82,8 @@ async function startQc() {
       completedNodes.value = new Set(completedNodes.value)
       activeNode.value = null
     }
-    running.value = false
+    runningNormal.value = false
+    runningTest.value = false
     streaming.value = false
   }
 }

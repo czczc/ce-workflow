@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -110,9 +110,9 @@ async def hardware_anomaly_check():
 
 
 @app.post("/qc/start")
-async def qc_start():
+async def qc_start(test: bool = Query(False)):
     return StreamingResponse(
-        run_pipeline(),
+        run_pipeline(test=test),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

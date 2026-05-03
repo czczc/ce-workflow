@@ -40,6 +40,7 @@ class PipelineState(TypedDict):
     run_id: int
     passed: bool
     summary: str
+    inject_anomalies: bool
 
 
 # ── nodes ────────────────────────────────────────────────────────────────────
@@ -71,7 +72,7 @@ async def monitor_respond(state: PipelineState) -> dict:
 
 
 async def daq_acquire(state: PipelineState) -> dict:
-    waveform = generate_waveform_data()
+    waveform = generate_waveform_data(inject_anomalies=state["inject_anomalies"])
     run_dir = save_waveforms(waveform)
     summary = {
         "n_channels": waveform["n_channels"],
@@ -232,6 +233,7 @@ _INITIAL_STATE: PipelineState = {
     "hardware_result": {}, "hardware_status": "",
     "run_dir": "", "daq_summary": {},
     "findings": {},
+    "inject_anomalies": True,
     "rag_chunks": [], "rag_context": "", "diagnosis": [],
     "run_id": 0, "passed": False, "summary": "",
 }
@@ -241,14 +243,15 @@ def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
-async def run_pipeline():
+async def run_pipeline(test: bool = False):
     yield _sse({"type": "node_active", "node": "check_hardware"})
     yield _sse({"type": "token", "text": "*Monitor Agent: Checking hardware status...*\n\n"})
 
     hardware_status = None
+    initial_state = {**_INITIAL_STATE, "inject_anomalies": test}
 
     async for mode, data in graph.astream(  # type: ignore[misc]
-        _INITIAL_STATE,
+        initial_state,
         stream_mode=["messages", "updates"],
     ):
         if mode == "updates":  # type: ignore[operator]
