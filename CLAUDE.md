@@ -10,4 +10,4 @@ Default label vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `read
 
 ### Domain docs
 
-Multi-context: `CONTEXT-MAP.md` at root points to `frontend/CONTEXT.md` (Vue 3) and `backend/CONTEXT.md` (Agno + Qdrant). See `docs/agents/domain.md`.
+Multi-context: `CONTEXT-MAP.md` at root points to `frontend/CONTEXT.md` (Vue 3) and `backend/CONTEXT.md` (LangGraph + Qdrant). See `docs/agents/domain.md`.

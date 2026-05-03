@@ -14,25 +14,32 @@
 ## Agent pipeline
 
 ```
-POST /qc/start
+POST /qc/start[?test=true]
       │
       ▼
 Monitor Agent          checks hardware anomaly detection service
       │ status == "good"
       ▼
 DAQ Agent              generates 32-ch ADC waveforms, saves to HDF5
+                       inject_anomalies=True (test mode) or False (normal mode)
       │
       ▼
-QC Analysis Agent      (planned, #22) — reads HDF5, detects anomalies
+QC Analysis Agent      reads HDF5, detects baseline drift / high noise /
+                       stuck bits / shape anomalies per channel
+      │ n_anomalous > 0
+      ▼
+Retrieve Context       RAG query against ingested documents
       │
       ▼
-Diagnostic Agent       (planned, #23) — diagnoses findings, RAG-backed
+Diagnostic Agent       maps anomaly types → suggested actions (RAG-backed)
       │
-      ▼
-Catalog & Report Agent (planned, #12) — writes to qc.db, summarises run
+      ▼                (skipped if n_anomalous == 0)
+Catalog & Report       writes run + summary to qc.db (SQLite), streams narrative
 ```
 
 If Monitor Agent returns `status != "good"`, the pipeline stops and the operator is instructed to fix the defect before retrying.
+
+`test=true` (QC Start (Test) button) injects 2–5 random anomalies into the waveforms. `test=false` (QC Start button) produces clean waveforms — QC always passes.
 
 ## LangGraph pattern
 
@@ -90,14 +97,31 @@ All agent endpoints return `text/event-stream`. Each line is `data: <json>\n\n`.
 - Default URL: `http://127.0.0.1:8000/hardware/anomaly-check` (same FastAPI server, placeholder endpoint)
 - Override via `HARDWARE_CHECK_URL` in `.env`
 
+## Reports API
+
+| Endpoint | Description |
+|---|---|
+| `GET /reports?page=1&limit=20` | Returns `{items: [...], total: N}` — server-side paginated |
+| `GET /reports/{id}` | Single run record; 404 if not found |
+
+**Run record fields:** `id`, `run_dir`, `timestamp`, `passed`, `n_channels`, `n_anomalous`, `summary` (markdown)
+
+SQLite DB path: `backend/data/qc.db` (configurable via `SQLITE_DB_PATH` in `.env`)
+
+Tables: `qc_runs` (run metadata) and `reports` (markdown summary, FK to `qc_runs.id`).
+
 ## Key files
 
 | File | Purpose |
 |---|---|
-| `main.py` | FastAPI app, route definitions, RAG chat endpoint |
+| `main.py` | FastAPI app, all route definitions |
 | `config.py` | Pydantic settings, all env vars |
-| `monitor_agent.py` | Monitor Agent — hardware gate, chains to DAQ on pass |
-| `daq_agent.py` | DAQ Agent — waveform generation + HDF5 persistence |
+| `pipeline.py` | Full LangGraph pipeline — `PipelineState`, all nodes, `run_pipeline(test)` SSE generator |
+| `monitor_agent.py` | Hardware gate node |
+| `daq_agent.py` | Waveform generation (`inject_anomalies` flag) + HDF5 persistence |
+| `qc_analysis_agent.py` | Per-channel anomaly detection (baseline, noise, stuck bit, shape) |
+| `diagnostic_agent.py` | Maps anomaly types → suggested actions |
+| `catalog_agent.py` | SQLite writes (`list_reports`, `get_report`, `catalog_write`) |
 | `document_store.py` | Qdrant hybrid search (dense + sparse) |
 | `rag_pipeline.py` | Document ingestion and RAG query |
 | `embedding.py` | Ollama embedding wrapper |
