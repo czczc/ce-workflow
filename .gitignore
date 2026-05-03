@@ -1,6 +1,9 @@
 # Secrets
 backend/.env
 
+# Agent instruction files (local only)
+AGENTS.md
+
 # Python-generated files
 __pycache__/
 *.py[oc]
