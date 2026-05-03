@@ -1,6 +1,15 @@
 <template>
   <v-card style="height: 100%; display: flex; flex-direction: column; overflow: hidden">
-    <v-card-title>Chat</v-card-title>
+    <v-card-title class="d-flex align-center">
+      Chat
+      <v-spacer />
+      <v-btn
+        variant="text"
+        size="small"
+        :disabled="streaming || !messages.length"
+        @click="clearHistory"
+      >Clear</v-btn>
+    </v-card-title>
     <v-divider />
     <v-card-text ref="threadRef" style="flex: 1; overflow-y: auto; min-height: 0">
       <div
@@ -79,6 +88,10 @@ function scrollToBottom() {
     const el = threadRef.value?.$el
     if (el) el.scrollTop = el.scrollHeight
   })
+}
+
+function clearHistory() {
+  messages.value = []
 }
 
 async function send() {
