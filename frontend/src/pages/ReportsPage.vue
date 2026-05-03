@@ -1,5 +1,5 @@
 <template>
-  <div style="padding: 8px">
+  <div style="padding: 8px; height: 100%; box-sizing: border-box">
     <ReportsView />
   </div>
 </template>
