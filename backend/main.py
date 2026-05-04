@@ -5,6 +5,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from sse import DONE, event, ollama_tokens
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -75,14 +76,14 @@ _CHAT_TOOLS = [
 
 
 async def _stream_chat(message: str, history: list[dict] = []):
-    yield f"data: {json.dumps({'type': 'loading'})}\n\n"
+    yield event({"type": "loading"})
 
     chunks = query(message, top_k=settings.retrieval_top_k)
     context = "\n\n".join(c.text for c in chunks)
 
     sources = sorted({c.source for c in chunks if c.source})
     if sources:
-        yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
+        yield event({"type": "sources", "sources": sources})
 
     if chunks:
         retrieval = [
@@ -96,7 +97,7 @@ async def _stream_chat(message: str, history: list[dict] = []):
             }
             for c in chunks
         ]
-        yield f"data: {json.dumps({'type': 'retrieval', 'chunks': retrieval})}\n\n"
+        yield event({"type": "retrieval", "chunks": retrieval})
 
     prior = history[-settings.history_turns :]
     user_content = f"Context:\n{context}\n\nQuestion: {message}" if context else message
@@ -117,20 +118,14 @@ async def _stream_chat(message: str, history: list[dict] = []):
             json={"model": settings.reasoning_model, "messages": messages, "tools": _CHAT_TOOLS, "stream": True, "think": False},
         ) as resp:
             resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line:
-                    continue
-                data = json.loads(line)
-                msg = data.get("message", {})
-                if msg.get("tool_calls"):
-                    tool_calls = msg["tool_calls"]
-                elif msg.get("content"):
-                    yield f"data: {json.dumps({'type': 'token', 'text': msg['content']})}\n\n"
-                if data.get("done"):
-                    break
+            async for content, calls in ollama_tokens(resp):
+                if calls:
+                    tool_calls = calls
+                elif content:
+                    yield event({"type": "token", "text": content})
 
         if not tool_calls:
-            yield "data: [DONE]\n\n"
+            yield DONE
             return
 
         # Phase 2: execute each tool via MCP
@@ -141,7 +136,7 @@ async def _stream_chat(message: str, history: list[dict] = []):
             if isinstance(args, str):
                 args = json.loads(args)
             result = await call_mcp_tool(name, args, settings.django_mcp_url)
-            yield f"data: {json.dumps({'type': 'tool_result', 'tool': name, 'result': result or {}})}\n\n"
+            yield event({"type": "tool_result", "tool": name, "result": result or {}})
             messages.append({"role": "tool", "content": json.dumps(result)})
 
         # Phase 3: stream final answer with tool results in context
@@ -151,17 +146,11 @@ async def _stream_chat(message: str, history: list[dict] = []):
             json={"model": settings.reasoning_model, "messages": messages, "stream": True, "think": False},
         ) as resp:
             resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line:
-                    continue
-                data = json.loads(line)
-                token = data.get("message", {}).get("content", "")
-                if token:
-                    yield f"data: {json.dumps({'type': 'token', 'text': token})}\n\n"
-                if data.get("done"):
-                    break
+            async for content, _ in ollama_tokens(resp):
+                if content:
+                    yield event({"type": "token", "text": content})
 
-    yield "data: [DONE]\n\n"
+    yield DONE
 
 
 @app.post("/chat/stream")

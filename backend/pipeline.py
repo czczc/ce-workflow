@@ -9,13 +9,14 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
 
+from anomaly_taxonomy import SUGGESTED_ACTIONS as _SUGGESTED_ACTIONS
 from catalog_agent import _build_summary, _connect, fetch_component_history
 from config import settings
 from daq_agent import N_CHANNELS, generate_waveform_data, save_waveforms
-from anomaly_taxonomy import SUGGESTED_ACTIONS as _SUGGESTED_ACTIONS
 from diagnostic_agent import _SYSTEM_PROMPT as _DIAG_PROMPT
 from monitor_agent import MONITOR_SYSTEM_PROMPT
 from rag_pipeline import query as rag_query
+from sse import DONE, event
 
 _llm = ChatOllama(
     model=settings.reasoning_model,
@@ -249,13 +250,9 @@ _INITIAL_STATE: PipelineState = {
 }
 
 
-def _sse(payload: dict) -> str:
-    return f"data: {json.dumps(payload)}\n\n"
-
-
 async def run_pipeline(test: bool = False, component_id: str = ""):
-    yield _sse({"type": "node_active", "node": "check_hardware"})
-    yield _sse({"type": "token", "text": "*Monitor Agent: Checking hardware status...*\n\n"})
+    yield event({"type": "node_active", "node": "check_hardware"})
+    yield event({"type": "token", "text": "*Monitor Agent: Checking hardware status...*\n\n"})
 
     hardware_status = None
     initial_state = {**_INITIAL_STATE, "inject_anomalies": test, "component_id": component_id}
@@ -271,62 +268,62 @@ async def run_pipeline(test: bool = False, component_id: str = ""):
             if node == "check_hardware":
                 result = update.get("hardware_result", {})
                 hardware_status = result.get("status")
-                yield _sse({"type": "tool_result", "tool": "hardware_anomaly_check", "result": result})
+                yield event({"type": "tool_result", "tool": "hardware_anomaly_check", "result": result})
 
             elif node == "monitor_respond":
-                yield _sse({"type": "node_active", "node": "monitor_respond"})
+                yield event({"type": "node_active", "node": "monitor_respond"})
                 if hardware_status == "good":
-                    yield _sse({"type": "node_active", "node": "daq_acquire"})
-                    yield _sse({"type": "token", "text": "\n\n*DAQ Agent: Acquiring waveform data...*\n\n"})
+                    yield event({"type": "node_active", "node": "daq_acquire"})
+                    yield event({"type": "token", "text": "\n\n*DAQ Agent: Acquiring waveform data...*\n\n"})
 
             elif node == "daq_acquire":
                 summary = update.get("daq_summary", {})  # type: ignore[union-attr]
                 run_name = Path(update.get("run_dir", "")).name  # type: ignore[union-attr]
-                yield _sse({"type": "tool_result", "tool": "daq_acquire", "result": summary})
-                yield _sse({"type": "token", "text": f"Acquired {N_CHANNELS}-channel ADC waveform ({summary.get('n_samples')} samples/channel). Saved to `{run_name}`.\n"})
-                yield _sse({"type": "node_active", "node": "qc_analyze"})
-                yield _sse({"type": "token", "text": "\n\n*QC Analysis Agent: Analyzing waveforms...*\n\n"})
+                yield event({"type": "tool_result", "tool": "daq_acquire", "result": summary})
+                yield event({"type": "token", "text": f"Acquired {N_CHANNELS}-channel ADC waveform ({summary.get('n_samples')} samples/channel). Saved to `{run_name}`.\n"})
+                yield event({"type": "node_active", "node": "qc_analyze"})
+                yield event({"type": "token", "text": "\n\n*QC Analysis Agent: Analyzing waveforms...*\n\n"})
 
             elif node == "qc_analyze":
                 findings = update.get("findings", {})  # type: ignore[union-attr]
-                yield _sse({"type": "tool_result", "tool": "qc_analysis", "result": findings})
+                yield event({"type": "tool_result", "tool": "qc_analysis", "result": findings})
                 n_anom = findings.get("n_anomalous", 0)
                 n_ch = findings.get("n_channels", 0)
                 if n_anom:
                     lines = [f"**QC Analysis complete.** {n_anom}/{n_ch} channels flagged:\n"]
                     for a in findings.get("anomalies", []):
                         lines.append(f"- Channel {a['channel']:02d}: {', '.join(a['issues'])}")
-                    yield _sse({"type": "token", "text": "\n".join(lines) + "\n"})
-                    yield _sse({"type": "node_active", "node": "retrieve_context"})
-                    yield _sse({"type": "token", "text": "\n\n*Diagnostic Agent: Analyzing findings...*\n\n"})
+                    yield event({"type": "token", "text": "\n".join(lines) + "\n"})
+                    yield event({"type": "node_active", "node": "retrieve_context"})
+                    yield event({"type": "token", "text": "\n\n*Diagnostic Agent: Analyzing findings...*\n\n"})
                 else:
-                    yield _sse({"type": "token", "text": f"**QC Analysis complete.** All {n_ch} channels passed. No anomalies detected.\n"})
-                    yield _sse({"type": "node_active", "node": "catalog_write"})
+                    yield event({"type": "token", "text": f"**QC Analysis complete.** All {n_ch} channels passed. No anomalies detected.\n"})
+                    yield event({"type": "node_active", "node": "catalog_write"})
 
             elif node == "retrieve_context":
                 chunks = update.get("rag_chunks", [])  # type: ignore[union-attr]
                 if chunks:
                     sources = sorted({c["source"] for c in chunks if c.get("source")})
-                    yield _sse({"type": "sources", "sources": sources})
-                    yield _sse({"type": "retrieval", "chunks": chunks})
-                yield _sse({"type": "node_active", "node": "build_diagnosis"})
+                    yield event({"type": "sources", "sources": sources})
+                    yield event({"type": "retrieval", "chunks": chunks})
+                yield event({"type": "node_active", "node": "build_diagnosis"})
 
             elif node == "build_diagnosis":
-                yield _sse({"type": "tool_result", "tool": "qc_diagnosis", "result": update.get("diagnosis", [])})  # type: ignore[union-attr]
-                yield _sse({"type": "node_active", "node": "narrate"})
+                yield event({"type": "tool_result", "tool": "qc_diagnosis", "result": update.get("diagnosis", [])})  # type: ignore[union-attr]
+                yield event({"type": "node_active", "node": "narrate"})
 
             elif node == "catalog_write":
-                yield _sse({"type": "node_active", "node": "catalog_write"})
-                yield _sse({"type": "token", "text": "\n\n*Catalog & Report Agent: Writing QC report...*\n\n"})
+                yield event({"type": "node_active", "node": "catalog_write"})
+                yield event({"type": "token", "text": "\n\n*Catalog & Report Agent: Writing QC report...*\n\n"})
                 if update.get("mcp_warning"):  # type: ignore[union-attr]
-                    yield _sse({"type": "token", "text": f"> ⚠ {update['mcp_warning']}\n\n"})  # type: ignore[index]
-                yield _sse({"type": "tool_result", "tool": "catalog_write", "result": {"run_id": update.get("run_id"), "passed": update.get("passed")}})  # type: ignore[union-attr]
-                yield _sse({"type": "token", "text": str(update.get("summary", "")) + "\n"})  # type: ignore[union-attr]
+                    yield event({"type": "token", "text": f"> ⚠ {update['mcp_warning']}\n\n"})  # type: ignore[index]
+                yield event({"type": "tool_result", "tool": "catalog_write", "result": {"run_id": update.get("run_id"), "passed": update.get("passed")}})  # type: ignore[union-attr]
+                yield event({"type": "token", "text": str(update.get("summary", "")) + "\n"})  # type: ignore[union-attr]
 
         elif mode == "messages":
             msg, _ = data  # type: ignore[misc]
             if msg.content:  # type: ignore[union-attr]
-                yield _sse({"type": "token", "text": msg.content})  # type: ignore[union-attr]
+                yield event({"type": "token", "text": msg.content})  # type: ignore[union-attr]
 
-    yield _sse({"type": "node_done"})
-    yield "data: [DONE]\n\n"
+    yield event({"type": "node_done"})
+    yield DONE
