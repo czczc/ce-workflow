@@ -1,34 +1,7 @@
 import json
-import sqlite3
-from pathlib import Path
 
 from anomaly_taxonomy import SUGGESTED_ACTIONS
-from config import settings
-
-_DB_PATH = Path(__file__).parent / settings.sqlite_db_path
-
-
-def _connect() -> sqlite3.Connection:
-    _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS qc_runs (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_dir     TEXT    NOT NULL,
-            timestamp   TEXT    NOT NULL,
-            passed      INTEGER NOT NULL,
-            n_channels  INTEGER NOT NULL,
-            n_anomalous INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS reports (
-            id      INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_id  INTEGER NOT NULL REFERENCES qc_runs(id),
-            summary TEXT    NOT NULL
-        );
-    """)
-    conn.commit()
-    return conn
+from run_store import store
 
 
 def _build_summary(findings: dict, component_history: dict | None = None) -> str:
@@ -64,49 +37,30 @@ def _build_summary(findings: dict, component_history: dict | None = None) -> str
 
 
 async def call_mcp_tool(name: str, arguments: dict, mcp_url: str):
-    """Call any tool on the Django DB MCP server. Returns None if unreachable."""
-    try:
-        from mcp import ClientSession
-        from mcp.client.streamable_http import streamablehttp_client
+    """Call any tool on the Django DB MCP server. Raises on connection or protocol failure."""
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
 
-        async with streamablehttp_client(mcp_url) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.call_tool(name, arguments)
-                if result.content and result.content[0].type == "text":
-                    return json.loads(result.content[0].text)
-    except Exception:
-        pass
+    async with streamablehttp_client(mcp_url) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(name, arguments)
+            if result.content and result.content[0].type == "text":
+                return json.loads(result.content[0].text)
     return None
 
 
 async def fetch_component_history(serial_number: str, mcp_url: str) -> dict | None:
     """Query the Django DB MCP server for FEMB history. Returns None if unreachable."""
-    return await call_mcp_tool("get_femb", {"serial_number": serial_number}, mcp_url)
-
-
-_REPORT_QUERY = """
-    SELECT r.id, r.run_dir, r.timestamp, r.passed, r.n_channels, r.n_anomalous, rp.summary
-    FROM qc_runs r
-    LEFT JOIN reports rp ON rp.run_id = r.id
-"""
+    try:
+        return await call_mcp_tool("get_femb", {"serial_number": serial_number}, mcp_url)
+    except Exception:
+        return None
 
 
 def list_reports(page: int = 1, limit: int = 20) -> dict:
-    conn = _connect()
-    total = conn.execute("SELECT COUNT(*) FROM qc_runs").fetchone()[0]
-    rows = conn.execute(
-        _REPORT_QUERY + "ORDER BY r.timestamp DESC LIMIT ? OFFSET ?",
-        (limit, (page - 1) * limit),
-    ).fetchall()
-    conn.close()
-    return {"items": [dict(row) for row in rows], "total": total}
+    return store.list_reports(page=page, limit=limit)
 
 
 def get_report(report_id: int) -> dict | None:
-    conn = _connect()
-    row = conn.execute(
-        _REPORT_QUERY + "WHERE r.id = ?", (report_id,)
-    ).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    return store.get_report(report_id)

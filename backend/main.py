@@ -135,9 +135,14 @@ async def _stream_chat(message: str, history: list[dict] = []):
             args = tc["function"]["arguments"]
             if isinstance(args, str):
                 args = json.loads(args)
-            result = await call_mcp_tool(name, args, settings.django_mcp_url)
-            yield event({"type": "tool_result", "tool": name, "result": result or {}})
-            messages.append({"role": "tool", "content": json.dumps(result)})
+            try:
+                result = await call_mcp_tool(name, args, settings.django_mcp_url)
+                yield event({"type": "tool_result", "tool": name, "result": result or {}})
+                messages.append({"role": "tool", "content": json.dumps(result)})
+            except Exception as exc:
+                msg = f"MCP tool '{name}' failed: {exc}"
+                yield event({"type": "error", "message": msg})
+                messages.append({"role": "tool", "content": json.dumps({"error": msg})})
 
         # Phase 3: stream final answer with tool results in context
         async with client.stream(

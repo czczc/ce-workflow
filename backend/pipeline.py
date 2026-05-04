@@ -10,7 +10,8 @@ from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
 
 from anomaly_taxonomy import SUGGESTED_ACTIONS as _SUGGESTED_ACTIONS
-from catalog_agent import _build_summary, _connect, fetch_component_history
+from catalog_agent import _build_summary, fetch_component_history
+from run_store import store as _run_store
 from config import settings
 from daq_agent import N_CHANNELS, generate_waveform_data, save_waveforms
 from diagnostic_agent import _SYSTEM_PROMPT as _DIAG_PROMPT
@@ -185,21 +186,14 @@ async def catalog_write(state: PipelineState) -> dict:
         if component_history is None:
             mcp_warning = f"Django DB MCP server unreachable ({settings.django_mcp_url}); report written without component history."
     summary = _build_summary(findings, component_history)
-    conn = _connect()
-    cur = conn.execute(
-        "INSERT INTO qc_runs (run_dir, timestamp, passed, n_channels, n_anomalous) VALUES (?, ?, ?, ?, ?)",
-        (
-            findings["run_dir"],
-            datetime.now(timezone.utc).isoformat(),
-            0 if findings["n_anomalous"] else 1,
-            findings["n_channels"],
-            findings["n_anomalous"],
-        ),
+    run_id = _run_store.write_run(
+        run_dir=findings["run_dir"],
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        passed=0 if findings["n_anomalous"] else 1,
+        n_channels=findings["n_channels"],
+        n_anomalous=findings["n_anomalous"],
+        summary=summary,
     )
-    run_id = cur.lastrowid
-    conn.execute("INSERT INTO reports (run_id, summary) VALUES (?, ?)", (run_id, summary))
-    conn.commit()
-    conn.close()
     return {"run_id": run_id, "passed": findings["n_anomalous"] == 0, "summary": summary, "mcp_warning": mcp_warning}
 
 
