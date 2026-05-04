@@ -26,31 +26,50 @@ _llm = ChatOllama(
 )
 
 
-class PipelineState(TypedDict):
-    # monitor
+class _StartupInputs(TypedDict):
+    inject_anomalies: bool
+    component_id: str
+
+class _HardwareIO(TypedDict):
     hardware_result: dict
     hardware_status: str
-    # daq
+
+class _DAQIO(TypedDict):
     run_dir: str
     daq_summary: dict
-    # qc analysis
+
+class _QCIO(TypedDict):
     findings: dict
-    # diagnostic
+
+class _RAGIO(TypedDict):
     rag_chunks: list
     rag_context: str
+
+class _DiagnosisIO(TypedDict):
     diagnosis: list
-    # catalog
+
+class _CatalogIO(TypedDict):
     run_id: int
     passed: bool
     summary: str
-    inject_anomalies: bool
-    component_id: str
     mcp_warning: str
+
+class PipelineState(
+    _StartupInputs, _HardwareIO, _DAQIO, _QCIO, _RAGIO, _DiagnosisIO, _CatalogIO,
+    total=False,
+):
+    pass
+
+class _NarrateIn(_QCIO, _RAGIO, _DiagnosisIO):
+    pass
+
+class _CatalogIn(_QCIO, _StartupInputs):
+    pass
 
 
 # ── nodes ────────────────────────────────────────────────────────────────────
 
-async def check_hardware(state: PipelineState) -> dict:
+async def check_hardware(state: PipelineState) -> _HardwareIO:
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             resp = await client.get(settings.hardware_check_url)
@@ -61,7 +80,7 @@ async def check_hardware(state: PipelineState) -> dict:
     return {"hardware_result": result, "hardware_status": result.get("status", "error")}
 
 
-async def monitor_respond(state: PipelineState) -> dict:
+async def monitor_respond(state: _HardwareIO) -> dict:
     messages = [
         SystemMessage(content=MONITOR_SYSTEM_PROMPT),
         HumanMessage(
@@ -76,7 +95,7 @@ async def monitor_respond(state: PipelineState) -> dict:
     return {}
 
 
-async def daq_acquire(state: PipelineState) -> dict:
+async def daq_acquire(state: _StartupInputs) -> _DAQIO:
     waveform = generate_waveform_data(inject_anomalies=state["inject_anomalies"])
     run_dir = save_waveforms(waveform)
     summary = {
@@ -88,7 +107,7 @@ async def daq_acquire(state: PipelineState) -> dict:
     return {"run_dir": str(run_dir), "daq_summary": summary}
 
 
-async def qc_analyze(state: PipelineState) -> dict:
+async def qc_analyze(state: _DAQIO) -> _QCIO:
     from qc_analysis_agent import _check_baseline, _check_noise_rms, _check_signal_shape
 
     run_dir = Path(state["run_dir"])
@@ -134,7 +153,7 @@ async def qc_analyze(state: PipelineState) -> dict:
     return {"findings": findings}
 
 
-async def retrieve_context(state: PipelineState) -> dict:
+async def retrieve_context(state: _QCIO) -> _RAGIO:
     anomalies = state["findings"].get("anomalies", [])
     anomaly_types = list({issue for a in anomalies for issue in a["issues"]})
     query_text = f"cold electronics ADC waveform anomaly: {', '.join(anomaly_types)}"
@@ -153,7 +172,7 @@ async def retrieve_context(state: PipelineState) -> dict:
     return {"rag_chunks": serialised, "rag_context": "\n\n".join(c.text for c in chunks)}
 
 
-async def build_diagnosis(state: PipelineState) -> dict:
+async def build_diagnosis(state: _QCIO) -> _DiagnosisIO:
     diagnosis = [
         {
             "channel": a["channel"],
@@ -166,7 +185,7 @@ async def build_diagnosis(state: PipelineState) -> dict:
     return {"diagnosis": diagnosis}
 
 
-async def narrate(state: PipelineState) -> dict:
+async def narrate(state: _NarrateIn) -> dict:
     content = f"QC findings:\n```json\n{json.dumps(state['findings'], indent=2)}\n```\n\n"
     content += f"Structured diagnosis:\n```json\n{json.dumps(state['diagnosis'], indent=2)}\n```\n\n"
     if state["rag_context"]:
@@ -177,7 +196,7 @@ async def narrate(state: PipelineState) -> dict:
     return {}
 
 
-async def catalog_write(state: PipelineState) -> dict:
+async def catalog_write(state: _CatalogIn) -> _CatalogIO:
     findings = state["findings"]
     component_history = None
     mcp_warning = ""
@@ -199,11 +218,11 @@ async def catalog_write(state: PipelineState) -> dict:
 
 # ── routing ───────────────────────────────────────────────────────────────────
 
-def _route_after_monitor(state: PipelineState) -> str:
+def _route_after_monitor(state: _HardwareIO) -> str:
     return "daq_acquire" if state["hardware_status"] == "good" else END
 
 
-def _route_after_qc(state: PipelineState) -> str:
+def _route_after_qc(state: _QCIO) -> str:
     return "retrieve_context" if state["findings"].get("n_anomalous", 0) > 0 else "catalog_write"
 
 
@@ -233,13 +252,8 @@ _builder.add_edge("narrate", "catalog_write")
 _builder.add_edge("catalog_write", END)
 graph = _builder.compile()
 
-_INITIAL_STATE: PipelineState = {
-    "hardware_result": {}, "hardware_status": "",
-    "run_dir": "", "daq_summary": {},
-    "findings": {},
+_INITIAL_STATE: _StartupInputs = {
     "inject_anomalies": True,
-    "rag_chunks": [], "rag_context": "", "diagnosis": [],
-    "run_id": 0, "passed": False, "summary": "", "mcp_warning": "",
     "component_id": "",
 }
 
@@ -249,7 +263,7 @@ async def run_pipeline(test: bool = False, component_id: str = ""):
     yield event({"type": "token", "text": "*Monitor Agent: Checking hardware status...*\n\n"})
 
     hardware_status = None
-    initial_state = {**_INITIAL_STATE, "inject_anomalies": test, "component_id": component_id}
+    initial_state: PipelineState = {**_INITIAL_STATE, "inject_anomalies": test, "component_id": component_id}  # type: ignore[typeddict-item]
 
     async for mode, data in graph.astream(  # type: ignore[misc]
         initial_state,
