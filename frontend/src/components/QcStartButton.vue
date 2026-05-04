@@ -34,6 +34,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useChat } from '../composables/useChat.js'
+import { readStream } from '../composables/useStream.js'
 
 const API = ''
 const { messages, streaming, activeNode, completedNodes } = useChat()
@@ -59,37 +60,21 @@ async function startQc(test) {
     if (componentId.value) params.set('component_id', componentId.value.trim())
     const url = `${API}/qc/start${params.size ? '?' + params : ''}`
     const resp = await fetch(url, { method: 'POST' })
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const parts = buffer.split('\n\n')
-      buffer = parts.pop()
-      for (const part of parts) {
-        const line = part.trim()
-        if (!line.startsWith('data: ')) continue
-        const data = line.slice(6)
-        if (data === '[DONE]') break
-        const evt = JSON.parse(data)
-        if (evt.type === 'token') {
-          messages.value[idx].text += evt.text
-        } else if (evt.type === 'node_active') {
-          if (activeNode.value) completedNodes.value.add(activeNode.value)
-          activeNode.value = evt.node
+    await readStream(resp, {
+      token: (evt) => { messages.value[idx].text += evt.text },
+      node_active: (evt) => {
+        if (activeNode.value) completedNodes.value.add(activeNode.value)
+        activeNode.value = evt.node
+        completedNodes.value = new Set(completedNodes.value)
+      },
+      node_done: () => {
+        if (activeNode.value) {
+          completedNodes.value.add(activeNode.value)
           completedNodes.value = new Set(completedNodes.value)
-        } else if (evt.type === 'node_done') {
-          if (activeNode.value) {
-            completedNodes.value.add(activeNode.value)
-            completedNodes.value = new Set(completedNodes.value)
-          }
-          activeNode.value = null
         }
-      }
-    }
+        activeNode.value = null
+      },
+    })
   } catch (err) {
     messages.value[idx].text = `Error: ${err.message}`
   } finally {

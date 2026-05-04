@@ -67,6 +67,7 @@
 import { ref, nextTick, watch } from 'vue'
 import { marked } from 'marked'
 import { useChat } from '../composables/useChat.js'
+import { readStream } from '../composables/useStream.js'
 
 const API = ''
 
@@ -117,32 +118,11 @@ async function send() {
       body: JSON.stringify({ message: text, history }),
     })
 
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const parts = buffer.split('\n\n')
-      buffer = parts.pop()
-      for (const part of parts) {
-        const line = part.trim()
-        if (!line.startsWith('data: ')) continue
-        const data = line.slice(6)
-        if (data === '[DONE]') break
-        const evt = JSON.parse(data)
-        if (evt.type === 'token') {
-          messages.value[idx].text += evt.text
-          scrollToBottom()
-        } else if (evt.type === 'sources') {
-          messages.value[idx].sources = evt.sources
-        } else if (evt.type === 'retrieval') {
-          messages.value[idx].retrieval = evt.chunks
-        }
-      }
-    }
+    await readStream(resp, {
+      token: (evt) => { messages.value[idx].text += evt.text; scrollToBottom() },
+      sources: (evt) => { messages.value[idx].sources = evt.sources },
+      retrieval: (evt) => { messages.value[idx].retrieval = evt.chunks },
+    })
   } catch (err) {
     messages.value[idx].text = `Error: ${err.message}`
   } finally {
