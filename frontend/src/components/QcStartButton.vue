@@ -33,11 +33,11 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { useChat } from '../composables/useChat.js'
+import { useSharedSession } from '../composables/useChat.js'
 import { readStream } from '../composables/useStream.js'
 
 const API = ''
-const { messages, streaming, activeNode, completedNodes } = useChat()
+const { messages, streaming, activeNode, completedNodes } = useSharedSession()
 const runningNormal = ref(false)
 const runningTest = ref(false)
 const anyRunning = computed(() => runningNormal.value || runningTest.value)

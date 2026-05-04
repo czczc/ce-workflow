@@ -1,11 +1,17 @@
 import { ref } from 'vue'
 
-// Module-level singletons so ChatView and QcStartButton share the same state.
-const messages = ref([])
-const streaming = ref(false)
-const activeNode = ref(null)
-const completedNodes = ref(new Set())
+export function createChatSession() {
+  return {
+    messages: ref([]),
+    streaming: ref(false),
+    activeNode: ref(null),
+    completedNodes: ref(new Set()),
+  }
+}
 
-export function useChat() {
-  return { messages, streaming, activeNode, completedNodes }
+let _shared = null
+
+export function useSharedSession() {
+  if (!_shared) _shared = createChatSession()
+  return _shared
 }

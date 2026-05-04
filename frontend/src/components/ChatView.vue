@@ -66,12 +66,12 @@
 <script setup>
 import { ref, nextTick, watch } from 'vue'
 import { marked } from 'marked'
-import { useChat } from '../composables/useChat.js'
+import { useSharedSession } from '../composables/useChat.js'
 import { readStream } from '../composables/useStream.js'
 
 const API = ''
 
-const { messages, streaming } = useChat()
+const { messages, streaming } = useSharedSession()
 const input = ref('')
 const threadRef = ref(null)
 
