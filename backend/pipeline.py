@@ -139,11 +139,11 @@ async def retrieve_context(state: PipelineState) -> dict:
     chunks = rag_query(query_text, top_k=settings.retrieval_top_k)
     serialised = [
         {
-            "source": c.metadata.get("source", ""),
-            "chunk_index": c.metadata.get("chunk_index", 0),
-            "rrf_score": round(c.metadata.get("_rrf_score", 0.0), 4),
-            "in_dense": c.metadata.get("_in_dense", False),
-            "in_sparse": c.metadata.get("_in_sparse", False),
+            "source": c.source,
+            "chunk_index": c.chunk_index,
+            "rrf_score": round(c.rrf_score, 4),
+            "in_dense": c.in_dense,
+            "in_sparse": c.in_sparse,
             "text": c.text,
         }
         for c in chunks

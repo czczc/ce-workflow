@@ -80,18 +80,18 @@ async def _stream_chat(message: str, history: list[dict] = []):
     chunks = query(message, top_k=settings.retrieval_top_k)
     context = "\n\n".join(c.text for c in chunks)
 
-    sources = sorted({c.metadata.get("source", "") for c in chunks if c.metadata.get("source")})
+    sources = sorted({c.source for c in chunks if c.source})
     if sources:
         yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
 
     if chunks:
         retrieval = [
             {
-                "source": c.metadata.get("source", ""),
-                "chunk_index": c.metadata.get("chunk_index", 0),
-                "rrf_score": round(c.metadata.get("_rrf_score", 0.0), 4),
-                "in_dense": c.metadata.get("_in_dense", False),
-                "in_sparse": c.metadata.get("_in_sparse", False),
+                "source": c.source,
+                "chunk_index": c.chunk_index,
+                "rrf_score": round(c.rrf_score, 4),
+                "in_dense": c.in_dense,
+                "in_sparse": c.in_sparse,
                 "text": c.text,
             }
             for c in chunks

@@ -1,4 +1,5 @@
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -7,6 +8,27 @@ from typing import Any
 from document_store import Chunk, DocumentStore
 from embedding import embed
 from config import settings
+
+
+@dataclass
+class RetrievedChunk:
+    text: str
+    source: str
+    chunk_index: int
+    rrf_score: float
+    in_dense: bool
+    in_sparse: bool
+
+
+def _to_retrieved(c: Chunk) -> RetrievedChunk:
+    return RetrievedChunk(
+        text=c.text,
+        source=c.metadata.get("source", ""),
+        chunk_index=c.metadata.get("chunk_index", 0),
+        rrf_score=c.metadata.get("_rrf_score", 0.0),
+        in_dense=c.metadata.get("_in_dense", False),
+        in_sparse=c.metadata.get("_in_sparse", False),
+    )
 
 
 @lru_cache(maxsize=1)
@@ -65,16 +87,16 @@ def ingest(file: str | Path, options: dict[str, Any] | None = None) -> str:
     return doc_id
 
 
-def query(text: str, top_k: int = 5, min_score: float = 0.0) -> list[Chunk]:
+def query(text: str, top_k: int = 5, min_score: float = 0.0) -> list[RetrievedChunk]:
     vector = embed(text)
     store = DocumentStore()
     if not settings.reranker_enabled:
-        return store.hybrid_search(query_vector=vector, query_text=text, k=top_k, min_score=min_score)
-
-    chunks = store.hybrid_search(query_vector=vector, query_text=text, k=settings.retrieval_top_k, min_score=min_score)
-    if not chunks:
-        return chunks
-    pairs = [[text, c.text] for c in chunks]
-    scores = _reranker().predict(pairs)
-    ranked = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
-    return [c for _, c in ranked[: settings.generation_top_k]]
+        raw = store.hybrid_search(query_vector=vector, query_text=text, k=top_k, min_score=min_score)
+    else:
+        raw = store.hybrid_search(query_vector=vector, query_text=text, k=settings.retrieval_top_k, min_score=min_score)
+        if raw:
+            pairs = [[text, c.text] for c in raw]
+            scores = _reranker().predict(pairs)
+            ranked = sorted(zip(scores, raw), key=lambda x: x[0], reverse=True)
+            raw = [c for _, c in ranked[: settings.generation_top_k]]
+    return [_to_retrieved(c) for c in raw]
