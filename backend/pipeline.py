@@ -12,7 +12,8 @@ from langgraph.graph import END, START, StateGraph
 from catalog_agent import _build_summary, _connect, fetch_component_history
 from config import settings
 from daq_agent import N_CHANNELS, generate_waveform_data, save_waveforms
-from diagnostic_agent import _SUGGESTED_ACTIONS, _SYSTEM_PROMPT as _DIAG_PROMPT
+from anomaly_taxonomy import SUGGESTED_ACTIONS as _SUGGESTED_ACTIONS
+from diagnostic_agent import _SYSTEM_PROMPT as _DIAG_PROMPT
 from monitor_agent import MONITOR_SYSTEM_PROMPT
 from rag_pipeline import query as rag_query
 

@@ -2,14 +2,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+from anomaly_taxonomy import SUGGESTED_ACTIONS
 from config import settings
-
-_SUGGESTED_ACTIONS = {
-    "baseline_drift": "Inspect grounding and shielding; check power supply stability",
-    "high_noise": "Check cable routing and shielding; verify ADC bias settings",
-    "stuck_bit": "Replace ASIC or inspect for loose connections; likely hardware fault",
-    "shape_anomaly": "Check for intermittent connections or cross-talk from adjacent channels",
-}
 
 _DB_PATH = Path(__file__).parent / settings.sqlite_db_path
 
@@ -44,7 +38,7 @@ def _build_summary(findings: dict, component_history: dict | None = None) -> str
         lines = [f"**QC FAIL** — {findings['n_anomalous']}/{findings['n_channels']} channels anomalous:"]
         for a in findings["anomalies"]:
             for issue in a["issues"]:
-                action = _SUGGESTED_ACTIONS.get(issue, "Investigate further")
+                action = SUGGESTED_ACTIONS.get(issue, "Investigate further")
                 lines.append(f"  - Ch {a['channel']:02d} `{issue}`: {action}")
 
     if component_history and "error" not in component_history:
