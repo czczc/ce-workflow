@@ -27,9 +27,9 @@ import { VueFlow } from '@vue-flow/core'
 import dagre from '@dagrejs/dagre'
 import '@vue-flow/core/dist/style.css'
 import { graphNodes, graphEdges } from '../composables/graphConfig.js'
-import { useChat } from '../composables/useChat.js'
+import { useSharedSession } from '../composables/useChat.js'
 
-const { activeNode, completedNodes } = useChat()
+const { activeNode, completedNodes } = useSharedSession()
 
 const NODE_W = 240
 const NODE_H = 40
