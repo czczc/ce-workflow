@@ -42,7 +42,7 @@ def test_ingest_returns_doc_id_and_query_returns_matching_chunk(tmp_path):
 
     results = query("cryogenic cold electronics liquid argon detector", top_k=3)
     assert len(results) >= 1
-    assert results[0].metadata["doc_id"] == doc_id
+    assert results[0].doc_id == doc_id
 
 
 def test_no_cross_contamination_between_documents(tmp_path):
@@ -63,4 +63,4 @@ def test_no_cross_contamination_between_documents(tmp_path):
 
     results = query("liquid argon ionization cold electronics cryogenic", top_k=1)
     assert len(results) >= 1
-    assert results[0].metadata["source"] == "physics.txt"
+    assert results[0].source == "physics.txt"

@@ -18,6 +18,7 @@ class RetrievedChunk:
     rrf_score: float
     in_dense: bool
     in_sparse: bool
+    doc_id: str = ""
 
 
 def _to_retrieved(c: Chunk) -> RetrievedChunk:
@@ -28,6 +29,7 @@ def _to_retrieved(c: Chunk) -> RetrievedChunk:
         rrf_score=c.metadata.get("_rrf_score", 0.0),
         in_dense=c.metadata.get("_in_dense", False),
         in_sparse=c.metadata.get("_in_sparse", False),
+        doc_id=c.metadata.get("doc_id", ""),
     )
 
 

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from document_store import Chunk
+from rag_pipeline import RetrievedChunk
 from main import app
 
 client = TestClient(app)
@@ -66,12 +66,13 @@ def test_chat_stream_no_context_still_calls_model():
 
 
 def test_chat_stream_emits_loading_then_tokens():
-    fake_chunk = Chunk(
-        id="c1", text="cold electronics use cryogenic detectors",
-        vector=[0.1], metadata={
-            "source": "detector.txt", "chunk_index": 0,
-            "_rrf_score": 0.016, "_in_dense": True, "_in_sparse": False,
-        }
+    fake_chunk = RetrievedChunk(
+        text="cold electronics use cryogenic detectors",
+        source="detector.txt",
+        chunk_index=0,
+        rrf_score=0.016,
+        in_dense=True,
+        in_sparse=False,
     )
     with (
         patch("main.query", return_value=[fake_chunk]),
