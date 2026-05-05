@@ -24,7 +24,7 @@ _DEFAULT_CONFIG = {
     "dac": "0x00",
 }
 
-_DEFAULT_FEMB_SERIAL = "IO-1865-1L_00042"
+_DEFAULT_FEMB_SERIAL = "IO-1865-1L_00039"
 
 
 def _faults_by_granularity(gran: str) -> list[str]:
