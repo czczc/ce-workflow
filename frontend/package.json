@@ -9,9 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@dagrejs/dagre": "^3.0.0",
     "@mdi/font": "^7.4.47",
-    "@vue-flow/core": "^1.48.2",
     "marked": "^18.0.2",
     "vue": "^3.4.0",
     "vue-router": "^4.6.4",
