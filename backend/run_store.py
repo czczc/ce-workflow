@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -5,12 +6,18 @@ from config import settings
 
 _SCHEMA = """
     CREATE TABLE IF NOT EXISTS qc_runs (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        run_dir     TEXT    NOT NULL,
-        timestamp   TEXT    NOT NULL,
-        passed      INTEGER NOT NULL,
-        n_channels  INTEGER NOT NULL,
-        n_anomalous INTEGER NOT NULL
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_dir          TEXT    NOT NULL,
+        timestamp        TEXT    NOT NULL,
+        femb_serial      TEXT    NOT NULL DEFAULT '',
+        slot             INTEGER NOT NULL DEFAULT 0,
+        config_label     TEXT    NOT NULL DEFAULT '',
+        passed           INTEGER NOT NULL,
+        n_channels       INTEGER NOT NULL,
+        n_anomalous      INTEGER NOT NULL,
+        fault_test_items TEXT    NOT NULL DEFAULT '[]',
+        board_faults     TEXT    NOT NULL DEFAULT '[]',
+        chip_faults      TEXT    NOT NULL DEFAULT '{}'
     );
     CREATE TABLE IF NOT EXISTS reports (
         id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,7 +27,10 @@ _SCHEMA = """
 """
 
 _REPORT_QUERY = """
-    SELECT r.id, r.run_dir, r.timestamp, r.passed, r.n_channels, r.n_anomalous, rp.summary
+    SELECT r.id, r.run_dir, r.timestamp, r.femb_serial, r.slot, r.config_label,
+           r.passed, r.n_channels, r.n_anomalous,
+           r.fault_test_items, r.board_faults, r.chip_faults,
+           rp.summary
     FROM qc_runs r
     LEFT JOIN reports rp ON rp.run_id = r.id
 """
@@ -48,33 +58,56 @@ class RunStore:
             (limit, (page - 1) * limit),
         ).fetchall()
         conn.close()
-        return {"items": [dict(row) for row in rows], "total": total}
+        return {"items": [_deserialise(dict(row)) for row in rows], "total": total}
 
     def get_report(self, report_id: int) -> dict | None:
         conn = self._open()
         row = conn.execute(_REPORT_QUERY + "WHERE r.id = ?", (report_id,)).fetchone()
         conn.close()
-        return dict(row) if row else None
+        return _deserialise(dict(row)) if row else None
 
     def write_run(
         self,
         run_dir: str,
         timestamp: str,
+        femb_serial: str,
+        slot: int,
+        config_label: str,
         passed: int,
         n_channels: int,
         n_anomalous: int,
+        fault_test_items: list[int],
+        board_faults: list[str],
+        chip_faults: dict[str, str],
         summary: str,
     ) -> int:
         conn = self._open()
         cur = conn.execute(
-            "INSERT INTO qc_runs (run_dir, timestamp, passed, n_channels, n_anomalous) VALUES (?, ?, ?, ?, ?)",
-            (run_dir, timestamp, passed, n_channels, n_anomalous),
+            """INSERT INTO qc_runs
+               (run_dir, timestamp, femb_serial, slot, config_label,
+                passed, n_channels, n_anomalous,
+                fault_test_items, board_faults, chip_faults)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                run_dir, timestamp, femb_serial, slot, config_label,
+                passed, n_channels, n_anomalous,
+                json.dumps(fault_test_items),
+                json.dumps(board_faults),
+                json.dumps(chip_faults),
+            ),
         )
         run_id = cur.lastrowid
         conn.execute("INSERT INTO reports (run_id, summary) VALUES (?, ?)", (run_id, summary))
         conn.commit()
         conn.close()
         return run_id
+
+
+def _deserialise(row: dict) -> dict:
+    for key in ("fault_test_items", "board_faults", "chip_faults"):
+        if isinstance(row.get(key), str):
+            row[key] = json.loads(row[key])
+    return row
 
 
 store = RunStore(Path(__file__).parent / settings.sqlite_db_path)

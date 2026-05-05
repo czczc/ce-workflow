@@ -1,6 +1,6 @@
-SUGGESTED_ACTIONS = {
-    "baseline_drift": "Inspect grounding and shielding; check power supply stability",
-    "high_noise": "Check cable routing and shielding; verify ADC bias settings",
-    "stuck_bit": "Replace ASIC or inspect for loose connections; likely hardware fault",
-    "shape_anomaly": "Check for intermittent connections or cross-talk from adjacent channels",
+from femb_test_schema import ALL_FAULT_SPECS
+
+# Backward-compatible mapping used by catalog_agent._build_summary
+SUGGESTED_ACTIONS: dict[str, str] = {
+    fault: spec["action"] for fault, spec in ALL_FAULT_SPECS.items()
 }

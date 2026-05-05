@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypedDict
 
-import h5py
 import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
@@ -13,7 +12,7 @@ from anomaly_taxonomy import SUGGESTED_ACTIONS as _SUGGESTED_ACTIONS
 from catalog_agent import _build_summary, fetch_component_history
 from run_store import store as _run_store
 from config import settings
-from daq_agent import N_CHANNELS, generate_waveform_data, save_waveforms
+from daq_agent import N_CHANNELS, generate_ce_agent_data, save_ce_agent_run
 from diagnostic_agent import _SYSTEM_PROMPT as _DIAG_PROMPT
 from monitor_agent import MONITOR_SYSTEM_PROMPT
 from rag_pipeline import query as rag_query
@@ -96,59 +95,44 @@ async def monitor_respond(state: _HardwareIO) -> dict:
 
 
 async def daq_acquire(state: _StartupInputs) -> _DAQIO:
-    waveform = generate_waveform_data(inject_anomalies=state["inject_anomalies"])
-    run_dir = save_waveforms(waveform)
+    data = generate_ce_agent_data(inject_faults=state["inject_anomalies"])
+    run_dir = save_ce_agent_run(data)
     summary = {
-        "n_channels": waveform["n_channels"],
-        "n_samples": waveform["n_samples"],
-        "channel_baselines": [ch["baseline"] for ch in waveform["channels"]],
+        "n_channels": N_CHANNELS,
+        "femb_serial": data["femb_serial"],
+        "slot": data["slot"],
+        "config_label": data["config_label"],
+        "slot_passed": data["slot_passed"],
         "run_dir": str(run_dir),
     }
     return {"run_dir": str(run_dir), "daq_summary": summary}
 
 
 async def qc_analyze(state: _DAQIO) -> _QCIO:
-    from qc_analysis_agent import _check_baseline, _check_noise_rms, _check_signal_shape
+    from qc_analysis_agent import flag_anomalous_channels
 
     run_dir = Path(state["run_dir"])
-    channel_results, anomalies = [], []
+    analysis = json.loads((run_dir / "channel_analysis.json").read_text())
+    anomalies = flag_anomalous_channels(analysis["channels"])
 
-    with h5py.File(run_dir / "waveforms.h5", "r") as f:
-        for key in sorted(f.keys()):
-            ch_idx = int(key.split("_")[1])
-            samples = list(f[key][:])
-            baseline = sum(samples) / len(samples)
-
-            bl = _check_baseline(baseline)
-            nr = _check_noise_rms(samples, baseline)
-            ss = _check_signal_shape(samples, baseline)
-
-            issues = []
-            if not bl["ok"]:
-                issues.append("baseline_drift")
-            if not nr["ok"]:
-                issues.append("high_noise")
-            if ss["stuck"]:
-                issues.append("stuck_bit")
-            elif not ss["ok"]:
-                issues.append("shape_anomaly")
-
-            result = {
-                "channel": ch_idx,
-                "baseline": bl["baseline"],
-                "noise_rms": nr["rms"],
-                "outlier_fraction": ss["outlier_fraction"],
-                "issues": issues,
-            }
-            channel_results.append(result)
-            if issues:
-                anomalies.append(result)
+    fault_files = sorted(p.name for p in run_dir.glob("*_F_*.md"))
+    pass_files = sorted(p.name for p in run_dir.glob("*_P_*.md"))
 
     findings = {
         "run_dir": state["run_dir"],
-        "n_channels": len(channel_results),
+        "femb_serial": analysis["femb_serial"],
+        "slot": analysis["slot"],
+        "config_label": analysis["config_label"],
+        "n_channels": analysis["n_channels"],
         "n_anomalous": len(anomalies),
         "anomalies": anomalies,
+        "fault_test_items": analysis["fault_test_items"],
+        "pass_test_items": analysis["pass_test_items"],
+        "slot_passed": analysis["slot_passed"],
+        "board_faults": analysis.get("board_faults", []),
+        "chip_faults": analysis.get("chip_faults", {}),
+        "fault_files": fault_files,
+        "pass_files": pass_files,
     }
     return {"findings": findings}
 
@@ -208,9 +192,15 @@ async def catalog_write(state: _CatalogIn) -> _CatalogIO:
     run_id = _run_store.write_run(
         run_dir=findings["run_dir"],
         timestamp=datetime.now(timezone.utc).isoformat(),
-        passed=0 if findings["n_anomalous"] else 1,
+        femb_serial=findings.get("femb_serial", ""),
+        slot=findings.get("slot", 0),
+        config_label=findings.get("config_label", ""),
+        passed=1 if findings.get("slot_passed", not findings["n_anomalous"]) else 0,
         n_channels=findings["n_channels"],
         n_anomalous=findings["n_anomalous"],
+        fault_test_items=findings.get("fault_test_items", []),
+        board_faults=findings.get("board_faults", []),
+        chip_faults=findings.get("chip_faults", {}),
         summary=summary,
     )
     return {"run_id": run_id, "passed": findings["n_anomalous"] == 0, "summary": summary, "mcp_warning": mcp_warning}
@@ -288,7 +278,9 @@ async def run_pipeline(test: bool = False, component_id: str = ""):
                 summary = update.get("daq_summary", {})  # type: ignore[union-attr]
                 run_name = Path(update.get("run_dir", "")).name  # type: ignore[union-attr]
                 yield event({"type": "tool_result", "tool": "daq_acquire", "result": summary})
-                yield event({"type": "token", "text": f"Acquired {N_CHANNELS}-channel ADC waveform ({summary.get('n_samples')} samples/channel). Saved to `{run_name}`.\n"})
+                serial = summary.get("femb_serial", "unknown")
+                cfg = summary.get("config_label", "")
+                yield event({"type": "token", "text": f"Acquired {N_CHANNELS}-channel data for FEMB `{serial}` (config: {cfg}). Saved to `{run_name}`.\n"})
                 yield event({"type": "node_active", "node": "qc_analyze"})
                 yield event({"type": "token", "text": "\n\n*QC Analysis Agent: Analyzing waveforms...*\n\n"})
 
