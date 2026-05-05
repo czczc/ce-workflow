@@ -255,6 +255,22 @@ ALL_FAULT_SPECS: dict[str, FaultSpec] = {
 }
 
 
+# LArASIC register encodings — used by mcp_daq.py and diagnostic_agent.py
+SNC_MAP: dict[str, int] = {"200mV": 1, "900mV": 0}
+GAIN_MAP: dict[str, tuple[int, int]] = {
+    "4.7mV/fC": (1, 1),
+    "7.8mV/fC": (1, 0),
+    "14mV/fC":  (0, 0),
+    "25mV/fC":  (0, 1),
+}
+PEAKING_MAP: dict[str, tuple[int, int]] = {
+    "0.5us": (0, 1),
+    "1.0us": (1, 0),
+    "2.0us": (1, 1),
+    "3.0us": (1, 1),
+}
+
+
 def build_llm_reference() -> str:
     """Return a compact Markdown table of all test items for inclusion in system prompts."""
     lines = [

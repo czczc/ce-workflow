@@ -29,6 +29,7 @@ class Settings(BaseSettings):
 
     hardware_check_url: str = "http://127.0.0.1:8000/hardware/anomaly-check"
     django_mcp_url: str = "http://localhost:8001/mcp"
+    daq_mcp_url: str = "http://localhost:8002/mcp"
 
 
 settings = Settings()

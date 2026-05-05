@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import TypedDict
 
 import httpx
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
 
@@ -13,7 +13,7 @@ from catalog_agent import _build_summary, fetch_component_history
 from run_store import store as _run_store
 from config import settings
 from daq_agent import N_CHANNELS, generate_ce_agent_data, save_ce_agent_run
-from diagnostic_agent import _SYSTEM_PROMPT as _DIAG_PROMPT
+from diagnostic_agent import _SYSTEM_PROMPT as _DIAG_PROMPT, _llm_with_tools, take_data
 from monitor_agent import MONITOR_SYSTEM_PROMPT
 from rag_pipeline import query as rag_query
 from sse import DONE, event
@@ -47,6 +47,9 @@ class _RAGIO(TypedDict):
 class _DiagnosisIO(TypedDict):
     diagnosis: list
 
+class _NarrateIO(TypedDict, total=False):
+    take_data_calls: list
+
 class _CatalogIO(TypedDict):
     run_id: int
     passed: bool
@@ -54,7 +57,7 @@ class _CatalogIO(TypedDict):
     mcp_warning: str
 
 class PipelineState(
-    _StartupInputs, _HardwareIO, _DAQIO, _QCIO, _RAGIO, _DiagnosisIO, _CatalogIO,
+    _StartupInputs, _HardwareIO, _DAQIO, _QCIO, _RAGIO, _DiagnosisIO, _NarrateIO, _CatalogIO,
     total=False,
 ):
     pass
@@ -169,15 +172,23 @@ async def build_diagnosis(state: _QCIO) -> _DiagnosisIO:
     return {"diagnosis": diagnosis}
 
 
-async def narrate(state: _NarrateIn) -> dict:
+async def narrate(state: _NarrateIn) -> _NarrateIO:
     content = f"QC findings:\n```json\n{json.dumps(state['findings'], indent=2)}\n```\n\n"
     content += f"Structured diagnosis:\n```json\n{json.dumps(state['diagnosis'], indent=2)}\n```\n\n"
-    if state["rag_context"]:
-        content += f"Technical context from knowledge base:\n{state['rag_context']}\n\n"
     content += "Summarise the findings and recommended actions for the operator."
     messages = [SystemMessage(content=_DIAG_PROMPT), HumanMessage(content=content)]
-    await _llm.ainvoke(messages)
-    return {}
+
+    response = await _llm_with_tools.ainvoke(messages)
+    take_data_calls: list = []
+    if response.tool_calls:
+        messages.append(response)
+        for tc in response.tool_calls:
+            result = take_data.invoke(tc["args"])
+            take_data_calls.append({"name": tc["name"], "args": tc["args"], "result": result})
+            messages.append(ToolMessage(content=json.dumps(result), tool_call_id=tc["id"]))
+        await _llm.ainvoke(messages)
+
+    return {"take_data_calls": take_data_calls}
 
 
 async def catalog_write(state: _CatalogIn) -> _CatalogIO:
@@ -311,6 +322,10 @@ async def run_pipeline(test: bool = False, component_id: str = ""):
             elif node == "build_diagnosis":
                 yield event({"type": "tool_result", "tool": "qc_diagnosis", "result": update.get("diagnosis", [])})  # type: ignore[union-attr]
                 yield event({"type": "node_active", "node": "narrate"})
+
+            elif node == "narrate":
+                for call in update.get("take_data_calls", []):  # type: ignore[union-attr]
+                    yield event({"type": "tool_result", "tool": "take_data", "result": call["result"]})
 
             elif node == "catalog_write":
                 yield event({"type": "node_active", "node": "catalog_write"})

@@ -72,7 +72,30 @@ _CHAT_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "take_data",
+            "description": (
+                "Validate LArASIC DAQ parameters and return resolved register bits. "
+                "Use when the user asks how to take data or configure a specific acquisition."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slot": {"type": "integer", "description": "FEMB slot index (0–3)"},
+                    "snc_label": {"type": "string", "description": "'200mV' or '900mV' baseline"},
+                    "gain_label": {"type": "string", "description": "'4.7mV/fC', '7.8mV/fC', '14mV/fC', or '25mV/fC'"},
+                    "peaking_label": {"type": "string", "description": "'0.5us', '1.0us', '2.0us', or '3.0us'"},
+                    "num_samples": {"type": "integer", "description": "Number of samples (default 10)"},
+                },
+                "required": ["slot", "snc_label", "gain_label", "peaking_label"],
+            },
+        },
+    },
 ]
+
+_DAQ_TOOLS = {"take_data"}
 
 
 async def _stream_chat(message: str, history: list[dict] = []):
@@ -136,7 +159,8 @@ async def _stream_chat(message: str, history: list[dict] = []):
             if isinstance(args, str):
                 args = json.loads(args)
             try:
-                result = await call_mcp_tool(name, args, settings.django_mcp_url)
+                mcp_url = settings.daq_mcp_url if name in _DAQ_TOOLS else settings.django_mcp_url
+                result = await call_mcp_tool(name, args, mcp_url)
                 yield event({"type": "tool_result", "tool": name, "result": result or {}})
                 messages.append({"role": "tool", "content": json.dumps(result)})
             except Exception as exc:
