@@ -4,8 +4,12 @@ from anomaly_taxonomy import SUGGESTED_ACTIONS
 from femb_test_schema import TEST_ITEMS
 from run_store import store
 
+# FE chip index (0–7) → femb_pos in cets core_fe table
+# Channels 0–15=FE_0, 16–31=FE_1, ..., 112–127=FE_7
+_FE_IDX_TO_FEMB_POS = ["F1", "B1", "B2", "F2", "F3", "B3", "B4", "F4"]
 
-def _build_summary(findings: dict, component_history: dict | None = None) -> str:
+
+def _build_summary(findings: dict, component_history: dict | None = None, chip_serials: dict | None = None) -> str:
     serial = findings.get("femb_serial", "unknown")
     slot = findings.get("slot", "?")
     config = findings.get("config_label", "")
@@ -26,9 +30,12 @@ def _build_summary(findings: dict, component_history: dict | None = None) -> str
     if chip_faults:
         lines.append("\n**Chip-level faults:**")
         for chip_idx, fault in chip_faults.items():
+            pos = _FE_IDX_TO_FEMB_POS[int(chip_idx)]
+            serial = (chip_serials or {}).get(pos, "")
+            serial_str = f" [{serial}]" if serial else ""
             ch_range = f"ch {int(chip_idx)*16}–{int(chip_idx)*16+15}"
             action = SUGGESTED_ACTIONS.get(fault, "Investigate further")
-            lines.append(f"  - Chip {chip_idx} ({ch_range}) `{fault}`: {action}")
+            lines.append(f"  - Chip {chip_idx} ({ch_range}) `{fault}` {pos}{serial_str}: {action}")
 
     chip_fault_set = set(chip_faults.values())
     anomalies = findings.get("anomalies", [])
@@ -36,9 +43,12 @@ def _build_summary(findings: dict, component_history: dict | None = None) -> str
     if channel_anomalies:
         lines.append("\n**Channel-level faults:**")
         for a in channel_anomalies:
+            pos = _FE_IDX_TO_FEMB_POS[a["chip"]]
+            serial = (chip_serials or {}).get(pos, "")
+            serial_str = f" [{serial}]" if serial else ""
             for issue in a["issues"]:
                 action = SUGGESTED_ACTIONS.get(issue, "Investigate further")
-                lines.append(f"  - Ch {a['channel']:03d} (chip {a['chip']}) `{issue}`: {action}")
+                lines.append(f"  - Ch {a['channel']:03d} (chip {a['chip']}) {pos}{serial_str} `{issue}`: {action}")
 
     fault_items = findings.get("fault_test_items", [])
     if fault_items:
@@ -80,9 +90,16 @@ async def call_mcp_tool(name: str, arguments: dict, mcp_url: str):
     return None
 
 
-async def fetch_component_history(serial_number: str, mcp_url: str) -> dict | None:
+async def fetch_component_history(femb_serial: str, mcp_url: str) -> dict | None:
     try:
-        return await call_mcp_tool("get_femb", {"serial_number": serial_number}, mcp_url)
+        return await call_mcp_tool("get_femb", {"femb_serial": femb_serial}, mcp_url)
+    except Exception:
+        return None
+
+
+async def fetch_chip_serials(femb_serial: str, mcp_url: str) -> dict | None:
+    try:
+        return await call_mcp_tool("get_femb_chips", {"femb_serial": femb_serial}, mcp_url)
     except Exception:
         return None
 

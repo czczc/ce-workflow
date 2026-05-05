@@ -9,7 +9,7 @@ from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
 
 from anomaly_taxonomy import SUGGESTED_ACTIONS as _SUGGESTED_ACTIONS
-from catalog_agent import _build_summary, fetch_component_history
+from catalog_agent import _build_summary, fetch_chip_serials, fetch_component_history
 from run_store import store as _run_store
 from config import settings
 from daq_agent import N_CHANNELS, generate_ce_agent_data, save_ce_agent_run
@@ -193,13 +193,16 @@ async def narrate(state: _NarrateIn) -> _NarrateIO:
 
 async def catalog_write(state: _CatalogIn) -> _CatalogIO:
     findings = state["findings"]
+    femb_serial = findings.get("femb_serial", "")
     component_history = None
+    chip_serials = None
     mcp_warning = ""
-    if state.get("component_id"):
-        component_history = await fetch_component_history(state["component_id"], settings.django_mcp_url)
+    if femb_serial:
+        component_history = await fetch_component_history(femb_serial, settings.django_mcp_url)
+        chip_serials = await fetch_chip_serials(femb_serial, settings.django_mcp_url)
         if component_history is None:
             mcp_warning = f"Django DB MCP server unreachable ({settings.django_mcp_url}); report written without component history."
-    summary = _build_summary(findings, component_history)
+    summary = _build_summary(findings, component_history, chip_serials)
     run_id = _run_store.write_run(
         run_dir=findings["run_dir"],
         timestamp=datetime.now(timezone.utc).isoformat(),

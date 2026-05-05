@@ -21,16 +21,25 @@ def _conn() -> sqlite3.Connection:
     return conn
 
 
+def _split_femb_serial(femb_serial: str) -> tuple[str, str]:
+    """Split 'IO-1865-1L_00039' into version='IO-1865-1L' and serial_number='00039'."""
+    idx = femb_serial.rfind("_")
+    if idx == -1:
+        raise ValueError(f"Invalid femb_serial format: {femb_serial!r}")
+    return femb_serial[:idx], femb_serial[idx + 1:]
+
+
 @mcp.tool()
-def get_femb(serial_number: str) -> dict[str, Any]:
-    """Return FEMB metadata and full test history for the given serial number."""
+def get_femb(femb_serial: str) -> dict[str, Any]:
+    """Return FEMB metadata and full test history for the given femb_serial (e.g. 'IO-1865-1L_00039')."""
+    version, serial_number = _split_femb_serial(femb_serial)
     conn = _conn()
     row = conn.execute(
-        "SELECT id, serial_number, version, status, last_update FROM core_femb WHERE serial_number = ?",
-        (serial_number,),
+        "SELECT id, serial_number, version, status, last_update FROM core_femb WHERE version = ? AND serial_number = ?",
+        (version, serial_number),
     ).fetchone()
     if row is None:
-        return {"error": f"FEMB {serial_number!r} not found"}
+        return {"error": f"FEMB {femb_serial!r} not found"}
     femb = dict(row)
     tests = conn.execute(
         "SELECT timestamp, test_type, test_env, site, status"
@@ -45,6 +54,25 @@ def get_femb(serial_number: str) -> dict[str, Any]:
         "last_update": femb["last_update"],
         "tests": [dict(t) for t in tests],
     }
+
+
+@mcp.tool()
+def get_femb_chips(femb_serial: str) -> dict[str, Any]:
+    """Return LArASIC chip serial numbers keyed by femb_pos for the given femb_serial."""
+    version, serial_number = _split_femb_serial(femb_serial)
+    conn = _conn()
+    row = conn.execute(
+        "SELECT id FROM core_femb WHERE version = ? AND serial_number = ?",
+        (version, serial_number),
+    ).fetchone()
+    if row is None:
+        return {"error": f"FEMB {femb_serial!r} not found"}
+    chips = conn.execute(
+        "SELECT femb_pos, serial_number FROM core_fe WHERE femb_id = ? ORDER BY femb_pos",
+        (row["id"],),
+    ).fetchall()
+    conn.close()
+    return {c["femb_pos"]: c["serial_number"] for c in chips}
 
 
 @mcp.tool()
