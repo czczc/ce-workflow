@@ -25,3 +25,4 @@ docker/storage/
 graphify-out/
 out/
 .idea/
+.design/
