@@ -29,6 +29,8 @@
           <tr>
             <th>Run ID</th>
             <th>Timestamp</th>
+            <th>FEMB Serial</th>
+            <th>Config</th>
             <th>Status</th>
             <th>Channels</th>
             <th>Anomalous</th>
@@ -43,6 +45,8 @@
           >
             <td>#{{ r.id }}</td>
             <td>{{ formatTime(r.timestamp) }}</td>
+            <td>{{ r.femb_serial }}</td>
+            <td>{{ r.config_label }}</td>
             <td>
               <v-chip :color="r.passed ? 'success' : 'error'" size="small">
                 {{ r.passed ? 'PASS' : 'FAIL' }}
