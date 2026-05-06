@@ -159,7 +159,15 @@ stop_one() {
     printf "  %-12s ${YELLOW}stopped${RESET}\n" "$svc"
   else
     rm -f "$pid_f"
-    printf "  %-12s not running\n" "$svc"
+    # Fall back to killing by port (handles processes started outside manage.sh)
+    local port="${SVC_PORT[$svc]}"
+    local pids_by_port; pids_by_port=$(lsof -ti :"$port" 2>/dev/null)
+    if [[ -n "$pids_by_port" ]]; then
+      echo "$pids_by_port" | xargs kill 2>/dev/null
+      printf "  %-12s ${YELLOW}stopped${RESET}\n" "$svc"
+    else
+      printf "  %-12s not running\n" "$svc"
+    fi
   fi
 }
 
