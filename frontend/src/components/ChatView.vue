@@ -131,7 +131,7 @@ const subtitle = ref('RAG · … · … · …')
 onMounted(async () => {
   try {
     const cfg = await fetch('/settings').then(r => r.json())
-    subtitle.value = `RAG · ${cfg.reasoning_model} · top-${cfg.retrieval_top_k} RRF · top-${cfg.generation_top_k} rerank`
+    subtitle.value = `RAG · ${cfg.reasoning_model} · top-${cfg.retrieval_top_k} RRF · top-${cfg.generation_top_k} Rerank`
   } catch { /* backend offline */ }
 })
 

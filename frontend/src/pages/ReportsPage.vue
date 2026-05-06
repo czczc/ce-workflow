@@ -1,5 +1,5 @@
 <template>
-  <div style="padding: 8px; height: 100%; box-sizing: border-box">
+  <div style="height: 100%; overflow: hidden">
     <ReportsView />
   </div>
 </template>

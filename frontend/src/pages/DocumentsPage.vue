@@ -1,7 +1,7 @@
 <template>
-  <v-container style="padding: 8px">
+  <div style="padding: 16px; height: 100%; box-sizing: border-box; overflow-y: auto;">
     <UploadPanel />
-  </v-container>
+  </div>
 </template>
 
 <script setup>
