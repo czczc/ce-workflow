@@ -177,10 +177,10 @@ async function startQc(test) {
 
 .btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
   border: none;
 }
-.btn-primary:hover:not(:disabled) { background: #0a7e8e; }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .btn-warn {

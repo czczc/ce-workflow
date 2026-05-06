@@ -20,6 +20,20 @@ export default createVuetify({
           'on-surface': '#11161c',
         },
       },
+      darkLab: {
+        dark: true,
+        colors: {
+          primary:      '#4dd0e1',
+          secondary:    '#4dd0e1',
+          warning:      '#ffb454',
+          error:        '#ff6b6b',
+          success:      '#5fd38a',
+          info:         '#6aa9ff',
+          background:   '#0c1014',
+          surface:      '#11161c',
+          'on-surface': '#e7ecf2',
+        },
+      },
     },
   },
 })

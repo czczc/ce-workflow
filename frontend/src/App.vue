@@ -18,6 +18,10 @@
           </RouterLink>
         </nav>
 
+        <button class="theme-btn" @click="toggleTheme" :title="isDark ? 'Switch to light theme' : 'Switch to dark theme'">
+          <span class="mdi" :class="isDark ? 'mdi-weather-sunny' : 'mdi-weather-night'"></span>
+        </button>
+
         <div class="sys-pill">
           <span class="sys-status-dot"></span>
           bench online · 87.2 K
@@ -46,6 +50,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useTheme } from 'vuetify'
 import { useSharedSession } from './composables/useChat'
 
 const { streaming, activeNode } = useSharedSession()
@@ -69,6 +74,27 @@ tick()
 let timer
 onMounted(()   => { timer = setInterval(tick, 1000) })
 onUnmounted(() => clearInterval(timer))
+
+// ── Theme toggle ───────────────────────────────────────────────────────────
+const theme = useTheme()
+
+function applyTheme(name) {
+  theme.global.name.value = name
+  document.documentElement.setAttribute('data-theme', name === 'darkLab' ? 'dark' : 'light')
+}
+
+// Initialise synchronously (before first render) from localStorage or system pref
+const savedTheme = localStorage.getItem('theme')
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+applyTheme(savedTheme ?? (systemDark ? 'darkLab' : 'lightLab'))
+
+const isDark = computed(() => theme.global.name.value === 'darkLab')
+
+function toggleTheme() {
+  const next = isDark.value ? 'lightLab' : 'darkLab'
+  applyTheme(next)
+  localStorage.setItem('theme', next)
+}
 </script>
 
 <style>
@@ -107,8 +133,8 @@ onUnmounted(() => clearInterval(timer))
   width: 22px;
   height: 22px;
   border-radius: 5px;
-  background: linear-gradient(135deg, var(--accent) 0%, #0a6f7e 100%);
-  color: #fff;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--brand-end) 100%);
+  color: var(--accent-fg);
   font-size: 11px;
   font-weight: 700;
   display: flex;
@@ -170,9 +196,28 @@ onUnmounted(() => clearInterval(timer))
   flex-shrink: 0;
 }
 
+/* Theme toggle */
+.theme-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 18px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+  flex-shrink: 0;
+}
+.theme-btn:hover { background: var(--bg-2); color: var(--ink-0); }
+
 /* System pill */
 .sys-pill {
-  margin-left: auto;
+  margin-left: 8px;
   display: flex;
   align-items: center;
   gap: 6px;

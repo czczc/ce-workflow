@@ -321,7 +321,7 @@ async function send() {
   flex-shrink: 0;
   letter-spacing: 0;
 }
-.avatar.agent  { background: linear-gradient(135deg, var(--accent) 0%, #0a6f7e 100%); color: #fff; border: none; }
+.avatar.agent  { background: linear-gradient(135deg, var(--accent) 0%, var(--brand-end) 100%); color: var(--accent-fg); border: none; }
 .avatar.user   { background: var(--bg-2); color: var(--ink-1); }
 .avatar.system { background: var(--bg-2); color: var(--ink-2); font-size: 11px; }
 
@@ -351,13 +351,13 @@ async function send() {
   word-break: break-word;
 }
 .bubble.agent  { border-top-left-radius: 3px; }
-.bubble.user   { background: var(--user-bubble); border-color: rgba(14,149,168,0.25); border-top-right-radius: 3px; color: #062a30; }
+.bubble.user   { background: var(--user-bubble); border-color: rgba(14,149,168,0.25); border-top-right-radius: 3px; color: var(--bubble-user-fg); }
 .bubble.system { background: transparent; border-style: dashed; border-color: var(--line-2); color: var(--ink-1); font-size: 12px; }
 
 /* ── Markdown overrides ── */
 .md-body :deep(h3)            { font-size: 13px; font-weight: 600; color: var(--ink-0); margin: 8px 0 4px; }
-.md-body :deep(strong)        { color: #000; font-weight: 600; }
-.md-body :deep(code)          { font-family: 'JetBrains Mono', monospace; font-size: 0.88em; background: rgba(14,149,168,0.1); color: #0a6f7e; padding: 1px 5px; border-radius: 3px; }
+.md-body :deep(strong)        { color: var(--strong-color); font-weight: 600; }
+.md-body :deep(code)          { font-family: 'JetBrains Mono', monospace; font-size: 0.88em; background: rgba(14,149,168,0.1); color: var(--code-text); padding: 1px 5px; border-radius: 3px; }
 .md-body :deep(table)         { border-collapse: collapse; font-size: 12px; width: 100%; margin: 6px 0; }
 .md-body :deep(th)            { font-size: 11px; text-transform: uppercase; color: var(--ink-2); padding: 5px 10px; border-bottom: 1px solid var(--line); text-align: left; }
 .md-body :deep(td)            { color: var(--ink-1); padding: 5px 10px; border-bottom: 1px solid var(--line); }
@@ -518,7 +518,7 @@ async function send() {
   border-radius: 7px;
   border: none;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
   font-size: 16px;
   cursor: pointer;
   display: flex;
@@ -528,7 +528,7 @@ async function send() {
   transition: background 120ms;
   margin-left: 6px;
 }
-.send-btn:hover:not(:disabled) { background: #0a7e8e; }
+.send-btn:hover:not(:disabled) { background: var(--accent-hover); }
 .send-btn:disabled { background: var(--bg-3); color: var(--ink-3); cursor: not-allowed; }
 
 .composer-foot {
