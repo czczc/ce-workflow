@@ -6,7 +6,7 @@
           <div class="brand-mark">CE</div>
           <span class="brand-name">Cold Electronics QC</span>
           <span class="brand-sep"></span>
-          <span class="brand-meta">v2.4 · femb-test-bench-3</span>
+          <span class="brand-meta">v{{ version }} · QC-CTS-BNL-1</span>
         </div>
 
         <nav class="top-nav">
@@ -49,6 +49,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSharedSession } from './composables/useChat'
 
 const { streaming, activeNode } = useSharedSession()
+const version = __APP_VERSION__
 
 const navLinks = [
   { to: '/chat',      label: 'Console' },

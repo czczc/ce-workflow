@@ -8,7 +8,7 @@
       <ChatView />
     </div>
     <div class="rail rail-right">
-      <!-- TelemetryRail: Phase 5 -->
+      <TelemetryRail />
     </div>
   </div>
 </template>
@@ -17,6 +17,7 @@
 import ChatView from '../components/ChatView.vue'
 import QcStartButton from '../components/QcStartButton.vue'
 import GraphFlow from '../components/GraphFlow.vue'
+import TelemetryRail from '../components/TelemetryRail.vue'
 </script>
 
 <style scoped>
@@ -27,6 +28,6 @@ import GraphFlow from '../components/GraphFlow.vue'
 }
 
 .rail-left  { border-right: 1px solid var(--line); overflow-y: auto; }
-.rail-right { border-left:  1px solid var(--line); }
+.rail-right { border-left:  1px solid var(--line); overflow: hidden; }
 .console-center { overflow: hidden; }
 </style>

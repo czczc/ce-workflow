@@ -5,7 +5,6 @@
     <div class="chat-header">
       <div class="header-title-group">
         <span class="header-title">Agent Console</span>
-        <span class="header-subtitle">RAG · gpt-4o · 6-chunk ctx</span>
       </div>
       <div class="header-actions">
         <button class="icon-btn" title="Export" disabled>
@@ -108,7 +107,7 @@
         <span class="foot-item"><kbd>↵</kbd> send</span>
         <span class="foot-item"><kbd>⇧↵</kbd> newline</span>
         <span class="foot-spacer"></span>
-        <span class="foot-item">retrieval: hybrid · top-6 RRF</span>
+        <span class="foot-subtitle">{{ subtitle }}</span>
       </div>
     </div>
 
@@ -116,7 +115,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick, watch } from 'vue'
+import { ref, nextTick, watch, onMounted } from 'vue'
 import { marked } from 'marked'
 import { useSharedSession } from '../composables/useChat.js'
 import { readStream } from '../composables/useStream.js'
@@ -127,6 +126,14 @@ const input = ref('')
 const threadRef = ref(null)
 const textareaRef = ref(null)
 const showChips = ref(false)
+const subtitle = ref('RAG · … · … · …')
+
+onMounted(async () => {
+  try {
+    const cfg = await fetch('/settings').then(r => r.json())
+    subtitle.value = `RAG · ${cfg.reasoning_model} · top-${cfg.retrieval_top_k} RRF · top-${cfg.generation_top_k} rerank`
+  } catch { /* backend offline */ }
+})
 
 const CHIPS = [
   'What is LArASIC?',
@@ -135,6 +142,7 @@ const CHIPS = [
 ]
 
 watch(() => messages.value.length, scrollToBottom)
+watch(() => messages.value.at(-1)?.text, () => { if (streaming.value) scrollToBottom() })
 
 function avatarText(role) {
   if (role === 'agent') return 'QC'
@@ -173,8 +181,10 @@ function render(text) {
 
 function scrollToBottom() {
   nextTick(() => {
-    const el = threadRef.value
-    if (el) el.scrollTop = el.scrollHeight
+    requestAnimationFrame(() => {
+      const el = threadRef.value
+      if (el) el.scrollTop = el.scrollHeight
+    })
   })
 }
 
@@ -260,9 +270,8 @@ async function send() {
   flex-shrink: 0;
 }
 
-.header-title-group { display: flex; flex-direction: column; gap: 2px; }
-.header-title       { font-size: 13px; font-weight: 600; color: var(--ink-0); line-height: 1; }
-.header-subtitle    { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--ink-2); line-height: 1; }
+.header-title-group { display: flex; align-items: center; }
+.header-title       { font-size: 13px; font-weight: 600; color: var(--ink-0); }
 
 .header-actions { display: flex; gap: 4px; }
 
@@ -286,6 +295,7 @@ async function send() {
 .thread {
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
   padding: 22px 10% 18px;
   background:
     radial-gradient(ellipse 800px 400px at 30% 0%, rgba(14,149,168,0.05), transparent 60%),
@@ -531,6 +541,7 @@ async function send() {
   color: var(--ink-3);
 }
 .foot-spacer { flex: 1; }
+.foot-subtitle { color: var(--ink-3); font-family: 'JetBrains Mono', monospace; font-size: 10.5px; }
 
 kbd {
   font-family: 'JetBrains Mono', monospace;

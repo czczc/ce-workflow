@@ -191,6 +191,16 @@ async def chat_stream(body: ChatRequest):
     )
 
 
+@app.get("/settings")
+async def get_settings():
+    return {
+        "reasoning_model":  settings.reasoning_model,
+        "retrieval_top_k":  settings.retrieval_top_k,
+        "generation_top_k": settings.generation_top_k,
+        "reranker_enabled": settings.reranker_enabled,
+    }
+
+
 @app.get("/hardware/anomaly-check")
 async def hardware_anomaly_check():
     """Placeholder hardware anomaly detection service. Replace with real service URL via HARDWARE_CHECK_URL."""

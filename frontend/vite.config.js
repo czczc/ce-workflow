@@ -2,8 +2,12 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vuetify from 'vite-plugin-vuetify'
+import pkg from './package.json'
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   test: {
     environment: 'node',
   },
@@ -22,6 +26,7 @@ export default defineConfig({
         bypass: (req) => req.headers.accept?.includes('text/html') ? '/index.html' : null,
       },
       '/qc': 'http://127.0.0.1:8000',
+      '/settings': 'http://127.0.0.1:8000',
       '/reports': {
         target: 'http://127.0.0.1:8000',
         bypass: (req) => req.headers.accept?.includes('text/html') ? '/index.html' : null,
