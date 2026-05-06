@@ -24,11 +24,16 @@ Vue Router (history mode). Routes:
 
 | File | Role |
 |---|---|
-| `App.vue` | Root layout — top nav bar, `<RouterView>` fills the main area |
-| `ChatView.vue` | Chat thread with RAG support — sends to `POST /chat/stream`, renders markdown, shows sources and retrieval debug panel |
-| `QcStartButton.vue` | Two buttons: **QC Start** (normal waveforms, `POST /qc/start`) and **QC Start (Test)** (anomaly injection, `POST /qc/start?test=true`). Both stream agent output into the shared message thread. Both disable while any run is active; only the clicked button shows a spinner. |
-| `UploadPanel.vue` | Document ingestion — `POST /documents/upload` with chunk size / overlap controls |
-| `ReportsView.vue` | Paginated `v-table` of QC runs — 20 rows per page, server-side pagination via `GET /reports?page&limit`. Row click navigates to `/reports/:id`. |
+| `App.vue` | Root layout — 48px topbar with brand, nav buttons, system pill; 24px statusbar; `<RouterView>` fills the main area |
+| `ChatPage.vue` | 3-column CSS grid (`320px 1fr 320px`): left rail (QC controls + pipeline graph), center (chat), right rail (telemetry) |
+| `ChatView.vue` | Chat thread — sends to `POST /chat/stream`, renders markdown via `marked`, auto-scroll during streaming, composer with auto-resize textarea, quick-prompt chips (toggled by lightbulb button) |
+| `QcStartButton.vue` | FEMB Serial input + **QC Start** / **Inject Test** buttons. Both stream agent output into the shared message thread and disable while any run is active. |
+| `GraphFlow.vue` | Left-rail wrapper showing pipeline node count; mounts `PipelineGraph.vue` |
+| `PipelineGraph.vue` | Pure SVG pipeline graph (280×480 viewBox, 8 nodes, bezier edges). Node states (pending/active/completed) driven by `activeNode` + `completedNodes`. Active nodes show a pulsing ring animation; completed nodes show a checkmark. |
+| `TelemetryRail.vue` | Right rail — three sections: Bench Telemetry (2×2 stat tiles with sparklines, mock rolling data), Recent Runs (last 3 from `GET /reports`, click to navigate), Retrieval Context (collapsible, shows chunks from last agent message) |
+| `Sparkline.vue` | Generic SVG polyline sparkline — props: `data: number[]`, `color`, `height` |
+| `UploadPanel.vue` | Document ingestion — `POST /documents/upload` with chunk size / overlap controls; lists uploaded docs from `GET /documents` |
+| `ReportsView.vue` | Paginated plain `<table>` of QC runs — 20 rows per page, server-side pagination via `GET /reports?page&limit`. Status shown as colored glow dot. Run ID and FEMB Serial in JetBrains Mono. Row click navigates to `/reports/:id`. |
 | `ReportDetailPage.vue` | Fetches `GET /reports/:id`, renders metadata card + markdown summary. Back button returns to list. |
 
 ## Shared state
@@ -44,7 +49,8 @@ const completedNodes = ref(new Set())
 
 **Message shape:**
 ```js
-{ role: 'user' | 'agent', text: string, sources: string[], retrieval: Chunk[] }
+{ role: 'user' | 'agent', text: string, sources: string[], retrieval: Chunk[], ts: number }
+// ts: Date.now() at send/receive time, used for the mono meta line in ChatView
 ```
 
 ## SSE consumer pattern
@@ -81,10 +87,11 @@ Base URL is `''` (same origin). Vite proxies to `http://localhost:8000` in dev.
 
 | Endpoint | Method | Used by |
 |---|---|---|
-| `/chat/stream` | POST `{message}` | `ChatView` |
+| `/chat/stream` | POST `{message, history}` | `ChatView` |
 | `/qc/start` | POST `?test=false` | `QcStartButton` (normal) |
 | `/qc/start?test=true` | POST | `QcStartButton` (anomaly injection) |
 | `/documents/upload` | POST (multipart) | `UploadPanel` |
 | `/documents` | GET | `UploadPanel` |
-| `/reports` | GET `?page=1&limit=20` | `ReportsView` |
+| `/reports` | GET `?page=1&limit=20` | `ReportsView`, `TelemetryRail` |
 | `/reports/:id` | GET | `ReportDetailPage` |
+| `/settings` | GET | `ChatView` (composer subtitle: model, top-k RRF, top-k Rerank) |

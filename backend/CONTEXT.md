@@ -80,7 +80,9 @@ All agent endpoints return `text/event-stream`. Each line is `data: <json>\n\n`.
 | `tool_result` | `tool: str`, `result: dict` | Logged / forwarded downstream |
 | `loading` | — | Shows spinner |
 | `sources` | `sources: str[]` | Displayed as source tags below message |
-| `retrieval` | `chunks: Chunk[]` | Shown in collapsible debug panel |
+| `retrieval` | `chunks: Chunk[]` | Shown in collapsible Retrieval Context panel (TelemetryRail) |
+| `node_active` | `node: str` | Highlights the named node in PipelineGraph |
+| `node_done` | `node: str` | Marks node completed in PipelineGraph (checkmark) |
 | `[DONE]` | (bare string, not JSON) | Ends the stream |
 
 ## Waveform storage
@@ -103,6 +105,7 @@ All agent endpoints return `text/event-stream`. Each line is `data: <json>\n\n`.
 |---|---|
 | `GET /reports?page=1&limit=20` | Returns `{items: [...], total: N}` — server-side paginated |
 | `GET /reports/{id}` | Single run record; 404 if not found |
+| `GET /settings` | Returns runtime config: `reasoning_model`, `retrieval_top_k`, `generation_top_k`, `reranker_enabled` |
 
 **Run record fields:** `id`, `run_dir`, `timestamp`, `passed`, `n_channels`, `n_anomalous`, `summary` (markdown)
 
@@ -121,7 +124,8 @@ Tables: `qc_runs` (run metadata) and `reports` (markdown summary, FK to `qc_runs
 | `daq_agent.py` | Waveform generation (`inject_anomalies` flag) + HDF5 persistence |
 | `qc_analysis_agent.py` | Per-channel anomaly detection (baseline, noise, stuck bit, shape) |
 | `diagnostic_agent.py` | Maps anomaly types → suggested actions |
-| `catalog_agent.py` | SQLite writes (`list_reports`, `get_report`, `catalog_write`) |
+| `catalog_agent.py` | SQLite writes (`list_reports`, `get_report`, `catalog_write`); MCP tool dispatch via `call_mcp_tool` |
+| `sse.py` | SSE helpers: `event()` serializer, `DONE` sentinel, `ollama_tokens()` async generator |
 | `document_store.py` | Qdrant hybrid search (dense + sparse) |
 | `rag_pipeline.py` | Document ingestion and RAG query |
 | `embedding.py` | Ollama embedding wrapper |
