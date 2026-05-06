@@ -79,7 +79,7 @@ onUnmounted(() => clearInterval(timer))
 const theme = useTheme()
 
 function applyTheme(name) {
-  theme.global.name.value = name
+  theme.change(name)
   document.documentElement.setAttribute('data-theme', name === 'darkLab' ? 'dark' : 'light')
 }
 

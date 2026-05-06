@@ -355,7 +355,24 @@ async function send() {
 .bubble.system { background: transparent; border-style: dashed; border-color: var(--line-2); color: var(--ink-1); font-size: 12px; }
 
 /* ── Markdown overrides ── */
-.md-body :deep(h3)            { font-size: 13px; font-weight: 600; color: var(--ink-0); margin: 8px 0 4px; }
+.md-body :deep(h3) {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-left: 3px solid var(--accent);
+  padding: 5px 10px;
+  margin: 4px 0 10px;
+  border-radius: 0 4px 4px 0;
+}
+.md-body :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 16px 0 4px;
+}
 .md-body :deep(strong)        { color: var(--strong-color); font-weight: 600; }
 .md-body :deep(code)          { font-family: 'JetBrains Mono', monospace; font-size: 0.88em; background: rgba(14,149,168,0.1); color: var(--code-text); padding: 1px 5px; border-radius: 3px; }
 .md-body :deep(table)         { border-collapse: collapse; font-size: 12px; width: 100%; margin: 6px 0; }

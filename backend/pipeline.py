@@ -264,7 +264,7 @@ _INITIAL_STATE: _StartupInputs = {
 
 async def run_pipeline(test: bool = False, component_id: str = ""):
     yield event({"type": "node_active", "node": "check_hardware"})
-    yield event({"type": "token", "text": "*Monitor Agent: Checking hardware status...*\n\n"})
+    yield event({"type": "token", "text": "### Monitor Agent: Checking hardware status...\n\n"})
 
     hardware_status = None
     initial_state: PipelineState = {**_INITIAL_STATE, "inject_anomalies": test, "component_id": component_id}  # type: ignore[typeddict-item]
@@ -286,7 +286,7 @@ async def run_pipeline(test: bool = False, component_id: str = ""):
                 yield event({"type": "node_active", "node": "monitor_respond"})
                 if hardware_status == "good":
                     yield event({"type": "node_active", "node": "daq_acquire"})
-                    yield event({"type": "token", "text": "\n\n*DAQ Agent: Acquiring waveform data...*\n\n"})
+                    yield event({"type": "token", "text": "\n\n---\n\n### DAQ Agent: Acquiring waveform data...\n\n"})
 
             elif node == "daq_acquire":
                 summary = update.get("daq_summary", {})  # type: ignore[union-attr]
@@ -296,7 +296,7 @@ async def run_pipeline(test: bool = False, component_id: str = ""):
                 cfg = summary.get("config_label", "")
                 yield event({"type": "token", "text": f"Acquired {N_CHANNELS}-channel data for FEMB `{serial}` (config: {cfg}). Saved to `{run_name}`.\n"})
                 yield event({"type": "node_active", "node": "qc_analyze"})
-                yield event({"type": "token", "text": "\n\n*QC Analysis Agent: Analyzing waveforms...*\n\n"})
+                yield event({"type": "token", "text": "\n\n---\n\n### QC Analysis Agent: Analyzing waveforms...\n\n"})
 
             elif node == "qc_analyze":
                 findings = update.get("findings", {})  # type: ignore[union-attr]
@@ -309,7 +309,7 @@ async def run_pipeline(test: bool = False, component_id: str = ""):
                         lines.append(f"- Channel {a['channel']:02d}: {', '.join(a['issues'])}")
                     yield event({"type": "token", "text": "\n".join(lines) + "\n"})
                     yield event({"type": "node_active", "node": "retrieve_context"})
-                    yield event({"type": "token", "text": "\n\n*Diagnostic Agent: Analyzing findings...*\n\n"})
+                    yield event({"type": "token", "text": "\n\n---\n\n### Diagnostic Agent: Analyzing findings...\n\n"})
                 else:
                     yield event({"type": "token", "text": f"**QC Analysis complete.** All {n_ch} channels passed. No anomalies detected.\n"})
                     yield event({"type": "node_active", "node": "catalog_write"})
@@ -332,7 +332,7 @@ async def run_pipeline(test: bool = False, component_id: str = ""):
 
             elif node == "catalog_write":
                 yield event({"type": "node_active", "node": "catalog_write"})
-                yield event({"type": "token", "text": "\n\n*Catalog & Report Agent: Writing QC report...*\n\n"})
+                yield event({"type": "token", "text": "\n\n---\n\n### Catalog & Report Agent: Writing QC report...\n\n"})
                 if update.get("mcp_warning"):  # type: ignore[union-attr]
                     yield event({"type": "token", "text": f"> ⚠ {update['mcp_warning']}\n\n"})  # type: ignore[index]
                 yield event({"type": "tool_result", "tool": "catalog_write", "result": {"run_id": update.get("run_id"), "passed": update.get("passed")}})  # type: ignore[union-attr]
