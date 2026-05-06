@@ -23,6 +23,7 @@ docker/storage/
 .claude
 # .scratch
 graphify-out/
+logs/
 out/
 .idea/
 .design/
