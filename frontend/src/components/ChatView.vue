@@ -107,7 +107,7 @@
         <span class="foot-item"><kbd>↵</kbd> send</span>
         <span class="foot-item"><kbd>⇧↵</kbd> newline</span>
         <span class="foot-spacer"></span>
-        <div class="subtitle-wrap">
+        <div class="subtitle-wrap" ref="settingsWrapRef">
           <button class="foot-subtitle" :class="{ 'subtitle-active': showSettings }" @click="showSettings = !showSettings">
             {{ subtitle }}
           </button>
@@ -147,7 +147,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, nextTick, watch, onMounted } from 'vue'
+import { ref, reactive, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { marked } from 'marked'
 import { useSharedSession } from '../composables/useChat.js'
 import { readStream } from '../composables/useStream.js'
@@ -159,6 +159,11 @@ const threadRef = ref(null)
 const textareaRef = ref(null)
 const showChips = ref(false)
 const showSettings = ref(false)
+const settingsWrapRef = ref(null)
+
+const inputHistory = ref([])
+const historyIndex = ref(-1)
+const inputDraft = ref('')
 
 const params = reactive({
   model: '',
@@ -175,7 +180,14 @@ const subtitle = computed(() =>
     : 'RAG · … · … · …'
 )
 
+function onDocClick(e) {
+  if (showSettings.value && settingsWrapRef.value && !settingsWrapRef.value.contains(e.target)) {
+    showSettings.value = false
+  }
+}
+
 onMounted(async () => {
+  document.addEventListener('click', onDocClick)
   try {
     const [cfg, models] = await Promise.all([
       fetch('/settings').then(r => r.json()),
@@ -188,6 +200,10 @@ onMounted(async () => {
     params.think = cfg.think ?? false
     availableModels.value = models
   } catch { /* backend offline */ }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocClick)
 })
 
 const CHIPS = [
@@ -258,6 +274,30 @@ function onKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     send()
+    return
+  }
+  const el = textareaRef.value
+  if (!el) return
+  if (e.key === 'ArrowUp' && el.selectionStart === 0 && inputHistory.value.length > 0) {
+    e.preventDefault()
+    if (historyIndex.value === -1) {
+      inputDraft.value = input.value
+      historyIndex.value = inputHistory.value.length - 1
+    } else if (historyIndex.value > 0) {
+      historyIndex.value--
+    }
+    input.value = inputHistory.value[historyIndex.value]
+    nextTick(() => autoResize())
+  } else if (e.key === 'ArrowDown' && historyIndex.value !== -1) {
+    e.preventDefault()
+    if (historyIndex.value < inputHistory.value.length - 1) {
+      historyIndex.value++
+      input.value = inputHistory.value[historyIndex.value]
+    } else {
+      historyIndex.value = -1
+      input.value = inputDraft.value
+    }
+    nextTick(() => autoResize())
   }
 }
 
@@ -265,6 +305,9 @@ async function send() {
   const text = input.value.trim()
   if (!text || streaming.value) return
 
+  inputHistory.value.push(text)
+  historyIndex.value = -1
+  inputDraft.value = ''
   input.value = ''
   nextTick(() => {
     if (textareaRef.value) textareaRef.value.style.height = 'auto'
