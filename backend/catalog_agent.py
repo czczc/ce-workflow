@@ -9,15 +9,21 @@ from run_store import store
 _FE_IDX_TO_FEMB_POS = ["F1", "B1", "B2", "F2", "F3", "B3", "B4", "F4"]
 
 
-def _build_summary(findings: dict, component_history: dict | None = None, chip_serials: dict | None = None) -> str:
+def _build_summary(findings: dict, chip_serials: dict | None = None) -> str:
     serial = findings.get("femb_serial", "unknown")
     slot = findings.get("slot", "?")
     config = findings.get("config_label", "")
     passed = findings.get("slot_passed", findings["n_anomalous"] == 0)
 
+    parts = serial.split("_", 1)
+    cets_link = ""
+    if len(parts) == 2:
+        cets_url = f"https://www.phy.bnl.gov/twister/cets/femb/{parts[0]}/{parts[1]}/"
+        cets_link = f" ([link]({cets_url}))"
+
     status = "**QC PASS**" if passed else "**QC FAIL**"
-    lines = [f"{status} — FEMB `{serial}` slot {slot} ({config})"]
-    lines.append(f"Channels: {findings['n_channels']} total, {findings['n_anomalous']} anomalous")
+    header = f"{status} — FEMB `{serial}`{cets_link} | slot {slot} ({config}) | Channels: {findings['n_channels']} total, {findings['n_anomalous']} anomalous"
+    lines = [header]
 
     board_faults = findings.get("board_faults", [])
     if board_faults:
@@ -54,25 +60,6 @@ def _build_summary(findings: dict, component_history: dict | None = None, chip_s
     if fault_items:
         item_names = [f"t{t} ({TEST_ITEMS[t]['name']})" for t in fault_items if t in TEST_ITEMS]
         lines.append(f"\n**Failing test items:** {', '.join(item_names)}")
-
-    if component_history and "error" not in component_history:
-        sn = component_history.get("serial_number", "?")
-        version = component_history.get("version", "?")
-        status_str = component_history.get("status", "?")
-        tests = component_history.get("tests", [])
-        n_pass = sum(1 for t in tests if t.get("status") == "pass")
-        lines.append(
-            f"\n**Component Provenance (FEMB {sn}):**"
-            f" version={version}, status={status_str},"
-            f" tests={len(tests)} ({n_pass} pass)"
-        )
-        if tests:
-            latest = tests[0]
-            lines.append(
-                f"  Latest: {latest['timestamp'][:10]}"
-                f" {latest['test_env']} {latest['test_type']} @ {latest['site']}"
-                f" → **{latest['status']}**"
-            )
 
     return "\n".join(lines)
 
