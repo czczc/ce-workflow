@@ -29,6 +29,11 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     history: list[dict] = []
+    model: str | None = None
+    retrieval_top_k: int | None = None
+    generation_top_k: int | None = None
+    reranker_enabled: bool | None = None
+    think: bool | None = None
 
 
 _SYSTEM_PROMPT = (
@@ -98,10 +103,24 @@ _CHAT_TOOLS = [
 _DAQ_TOOLS = {"take_data"}
 
 
-async def _stream_chat(message: str, history: list[dict] = []):
+async def _stream_chat(
+    message: str,
+    history: list[dict] = [],
+    *,
+    model: str,
+    retrieval_top_k: int,
+    generation_top_k: int,
+    reranker_enabled: bool,
+    think: bool,
+):
     yield event({"type": "loading"})
 
-    chunks = query(message, top_k=settings.retrieval_top_k)
+    chunks = query(
+        message,
+        top_k=retrieval_top_k,
+        reranker_enabled=reranker_enabled,
+        generation_top_k=generation_top_k,
+    )
     context = "\n\n".join(c.text for c in chunks)
 
     sources = sorted({c.source for c in chunks if c.source})
@@ -138,7 +157,7 @@ async def _stream_chat(message: str, history: list[dict] = []):
         async with client.stream(
             "POST",
             ollama_url,
-            json={"model": settings.reasoning_model, "messages": messages, "tools": _CHAT_TOOLS, "stream": True, "think": False},
+            json={"model": model, "messages": messages, "tools": _CHAT_TOOLS, "stream": True, "think": think},
         ) as resp:
             resp.raise_for_status()
             async for content, calls in ollama_tokens(resp):
@@ -172,7 +191,7 @@ async def _stream_chat(message: str, history: list[dict] = []):
         async with client.stream(
             "POST",
             ollama_url,
-            json={"model": settings.reasoning_model, "messages": messages, "stream": True, "think": False},
+            json={"model": model, "messages": messages, "stream": True, "think": think},
         ) as resp:
             resp.raise_for_status()
             async for content, _ in ollama_tokens(resp):
@@ -185,7 +204,15 @@ async def _stream_chat(message: str, history: list[dict] = []):
 @app.post("/chat/stream")
 async def chat_stream(body: ChatRequest):
     return StreamingResponse(
-        _stream_chat(body.message, body.history),
+        _stream_chat(
+            body.message,
+            body.history,
+            model=body.model or settings.reasoning_model,
+            retrieval_top_k=body.retrieval_top_k if body.retrieval_top_k is not None else settings.retrieval_top_k,
+            generation_top_k=body.generation_top_k if body.generation_top_k is not None else settings.generation_top_k,
+            reranker_enabled=body.reranker_enabled if body.reranker_enabled is not None else settings.reranker_enabled,
+            think=body.think if body.think is not None else settings.reasoning_model_think,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -198,7 +225,16 @@ async def get_settings():
         "retrieval_top_k":  settings.retrieval_top_k,
         "generation_top_k": settings.generation_top_k,
         "reranker_enabled": settings.reranker_enabled,
+        "think":            settings.reasoning_model_think,
     }
+
+
+@app.get("/models")
+async def list_models():
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(f"{settings.ollama_base_url}/api/tags")
+        resp.raise_for_status()
+    return [m["name"] for m in resp.json().get("models", [])]
 
 
 @app.get("/hardware/anomaly-check")

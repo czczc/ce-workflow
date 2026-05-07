@@ -27,6 +27,7 @@ export default defineConfig({
       },
       '/qc': 'http://127.0.0.1:8000',
       '/settings': 'http://127.0.0.1:8000',
+      '/models': 'http://127.0.0.1:8000',
       '/reports': {
         target: 'http://127.0.0.1:8000',
         bypass: (req) => req.headers.accept?.includes('text/html') ? '/index.html' : null,

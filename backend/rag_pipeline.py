@@ -89,16 +89,26 @@ def ingest(file: str | Path, options: dict[str, Any] | None = None) -> str:
     return doc_id
 
 
-def query(text: str, top_k: int = 5, min_score: float = 0.0) -> list[RetrievedChunk]:
+def query(
+    text: str,
+    top_k: int | None = None,
+    min_score: float = 0.0,
+    *,
+    reranker_enabled: bool | None = None,
+    generation_top_k: int | None = None,
+) -> list[RetrievedChunk]:
+    _reranker_on = reranker_enabled if reranker_enabled is not None else settings.reranker_enabled
+    _gen_top_k = generation_top_k if generation_top_k is not None else settings.generation_top_k
+    _top_k = top_k if top_k is not None else settings.retrieval_top_k
     vector = embed(text)
     store = DocumentStore()
-    if not settings.reranker_enabled:
-        raw = store.hybrid_search(query_vector=vector, query_text=text, k=top_k, min_score=min_score)
+    if not _reranker_on:
+        raw = store.hybrid_search(query_vector=vector, query_text=text, k=_top_k, min_score=min_score)
     else:
-        raw = store.hybrid_search(query_vector=vector, query_text=text, k=settings.retrieval_top_k, min_score=min_score)
+        raw = store.hybrid_search(query_vector=vector, query_text=text, k=_top_k, min_score=min_score)
         if raw:
             pairs = [[text, c.text] for c in raw]
             scores = _reranker().predict(pairs)
             ranked = sorted(zip(scores, raw), key=lambda x: x[0], reverse=True)
-            raw = [c for _, c in ranked[: settings.generation_top_k]]
+            raw = [c for _, c in ranked[:_gen_top_k]]
     return [_to_retrieved(c) for c in raw]

@@ -107,7 +107,39 @@
         <span class="foot-item"><kbd>↵</kbd> send</span>
         <span class="foot-item"><kbd>⇧↵</kbd> newline</span>
         <span class="foot-spacer"></span>
-        <span class="foot-subtitle">{{ subtitle }}</span>
+        <div class="subtitle-wrap">
+          <button class="foot-subtitle" :class="{ 'subtitle-active': showSettings }" @click="showSettings = !showSettings">
+            {{ subtitle }}
+          </button>
+          <div v-if="showSettings" class="settings-popover">
+            <div class="sp-row">
+              <label class="sp-label">Model</label>
+              <select class="sp-select" v-model="params.model">
+                <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
+              </select>
+            </div>
+            <div class="sp-row">
+              <label class="sp-label">Retrieval top-k</label>
+              <input class="sp-input" type="number" min="1" max="50" v-model.number="params.retrieval_top_k" />
+            </div>
+            <div class="sp-row">
+              <label class="sp-label">Generation top-k</label>
+              <input class="sp-input" type="number" min="1" max="20" v-model.number="params.generation_top_k" />
+            </div>
+            <div class="sp-row">
+              <label class="sp-label">Reranker</label>
+              <button class="sp-toggle" :class="{ 'sp-toggle-on': params.reranker_enabled }" @click="params.reranker_enabled = !params.reranker_enabled">
+                {{ params.reranker_enabled ? 'on' : 'off' }}
+              </button>
+            </div>
+            <div class="sp-row">
+              <label class="sp-label">Think mode</label>
+              <button class="sp-toggle" :class="{ 'sp-toggle-on': params.think }" @click="params.think = !params.think">
+                {{ params.think ? 'on' : 'off' }}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -115,7 +147,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick, watch, onMounted } from 'vue'
+import { ref, reactive, computed, nextTick, watch, onMounted } from 'vue'
 import { marked } from 'marked'
 import { useSharedSession } from '../composables/useChat.js'
 import { readStream } from '../composables/useStream.js'
@@ -126,12 +158,35 @@ const input = ref('')
 const threadRef = ref(null)
 const textareaRef = ref(null)
 const showChips = ref(false)
-const subtitle = ref('RAG · … · … · …')
+const showSettings = ref(false)
+
+const params = reactive({
+  model: '',
+  retrieval_top_k: 10,
+  generation_top_k: 3,
+  reranker_enabled: false,
+  think: false,
+})
+const availableModels = ref([])
+
+const subtitle = computed(() =>
+  params.model
+    ? `RAG · ${params.model} · top-${params.retrieval_top_k} RRF · top-${params.generation_top_k} Rerank`
+    : 'RAG · … · … · …'
+)
 
 onMounted(async () => {
   try {
-    const cfg = await fetch('/settings').then(r => r.json())
-    subtitle.value = `RAG · ${cfg.reasoning_model} · top-${cfg.retrieval_top_k} RRF · top-${cfg.generation_top_k} Rerank`
+    const [cfg, models] = await Promise.all([
+      fetch('/settings').then(r => r.json()),
+      fetch('/models').then(r => r.json()),
+    ])
+    params.model = cfg.reasoning_model
+    params.retrieval_top_k = cfg.retrieval_top_k
+    params.generation_top_k = cfg.generation_top_k
+    params.reranker_enabled = cfg.reranker_enabled
+    params.think = cfg.think ?? false
+    availableModels.value = models
   } catch { /* backend offline */ }
 })
 
@@ -230,7 +285,7 @@ async function send() {
     const resp = await fetch(`${API}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, history }),
+      body: JSON.stringify({ message: text, history, ...params }),
     })
     await readStream(resp, {
       token:     (evt) => { messages.value[idx].text += evt.text; scrollToBottom() },
@@ -568,5 +623,87 @@ kbd {
   border-radius: 3px;
   color: var(--ink-2);
   font-size: 10.5px;
+}
+
+/* ── Settings popover ── */
+.subtitle-wrap { position: relative; }
+
+.foot-subtitle {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--ink-3);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  transition: color 120ms;
+}
+.foot-subtitle:hover,
+.subtitle-active { color: var(--ink-1); }
+
+.settings-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  width: 260px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  padding: 12px 14px;
+  z-index: 100;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sp-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.sp-select,
+.sp-input {
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  color: var(--ink-0);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  padding: 3px 6px;
+  outline: none;
+  min-width: 0;
+}
+.sp-select { flex: 1; }
+.sp-input  { width: 52px; text-align: right; }
+.sp-select:focus,
+.sp-input:focus { border-color: var(--accent); }
+
+.sp-toggle {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  padding: 2px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+  min-width: 36px;
+  text-align: center;
+}
+.sp-toggle-on {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 </style>
