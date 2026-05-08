@@ -60,6 +60,7 @@ _load_services() {
 }
 
 ALL_SERVICES=(ollama qdrant backend mcp-db mcp-daq frontend)
+STOP_SERVICES=(backend mcp-db mcp-daq frontend)
 
 # --- Helpers ---
 
@@ -135,6 +136,15 @@ cmd_start() {
 
 # --- Stop ---
 
+_wait_stopped() {
+  local host="$1" port="$2"
+  local i
+  for ((i=0; i<10; i++)); do
+    is_running "$host" "$port" || return 0
+    sleep 0.5
+  done
+}
+
 stop_one() {
   local svc="$1"
   local pid_f; pid_f=$(pid_file "$svc")
@@ -152,22 +162,18 @@ stop_one() {
     return
   fi
 
+  local host="${SVC_HOST[$svc]}" port="${SVC_PORT[$svc]}"
   local pid; pid=$(read_pid "$svc")
-  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-    kill "$pid"
-    rm -f "$pid_f"
+  [[ -n "$pid" ]] && kill "$pid" 2>/dev/null
+  rm -f "$pid_f"
+  # Always kill by port to catch child processes (e.g. Vite spawned by npm)
+  local pids_by_port; pids_by_port=$(lsof -ti :"$port" 2>/dev/null)
+  if [[ -n "$pids_by_port" ]] || [[ -n "$pid" ]]; then
+    [[ -n "$pids_by_port" ]] && echo "$pids_by_port" | xargs kill 2>/dev/null
+    _wait_stopped "$host" "$port"
     printf "  %-12s ${YELLOW}stopped${RESET}\n" "$svc"
   else
-    rm -f "$pid_f"
-    # Fall back to killing by port (handles processes started outside manage.sh)
-    local port="${SVC_PORT[$svc]}"
-    local pids_by_port; pids_by_port=$(lsof -ti :"$port" 2>/dev/null)
-    if [[ -n "$pids_by_port" ]]; then
-      echo "$pids_by_port" | xargs kill 2>/dev/null
-      printf "  %-12s ${YELLOW}stopped${RESET}\n" "$svc"
-    else
-      printf "  %-12s not running\n" "$svc"
-    fi
+    printf "  %-12s not running\n" "$svc"
   fi
 }
 
@@ -175,7 +181,7 @@ cmd_stop() {
   local target="${1:-all}"
   echo ""
   if [[ "$target" == "all" ]]; then
-    for svc in "${ALL_SERVICES[@]}"; do stop_one "$svc"; done
+    for svc in "${STOP_SERVICES[@]}"; do stop_one "$svc"; done
   else
     _require_valid_service "$target" && stop_one "$target"
   fi
@@ -202,7 +208,7 @@ cmd_restart() {
   local target="${1:-all}"
   echo ""
   if [[ "$target" == "all" ]]; then
-    for svc in "${ALL_SERVICES[@]}"; do restart_one "$svc"; done
+    for svc in "${STOP_SERVICES[@]}"; do restart_one "$svc"; done
   else
     _require_valid_service "$target" && restart_one "$target"
   fi
