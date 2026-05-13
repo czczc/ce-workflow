@@ -116,12 +116,18 @@
         <span class="summary-stat">
           {{ state.summary.n_failed }} / {{ state.summary.n_tests }} failed
         </span>
-        <span v-if="state.summary.from_cache" class="cache-chip" title="loaded from saved record">cached</span>
+        <span v-if="state.summary.streaming" class="summary-status streaming">
+          <span class="dot pulse"></span>
+          generating…
+        </span>
+        <span v-else-if="state.summary.from_cache" class="cache-chip" title="loaded from saved record">cached</span>
       </div>
       <div
+        v-if="state.summary.summary_md || !state.summary.streaming"
         class="summary-body markdown-body"
         v-html="renderMarkdown(state.summary.summary_md)"
       ></div>
+      <div v-else class="summary-placeholder">awaiting LLM tokens…</div>
     </div>
   </div>
 </template>
@@ -556,4 +562,27 @@ function renderMarkdown(text) {
   color: var(--ink-1);
 }
 .summary-body :deep(p) { margin: 0; }
+
+.summary-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.summary-status.streaming {
+  color: var(--info);
+  background: rgba(56, 139, 253, 0.12);
+}
+
+.summary-placeholder {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--ink-2);
+  padding: 2px 0;
+}
 </style>

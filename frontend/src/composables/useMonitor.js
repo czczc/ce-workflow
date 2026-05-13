@@ -109,14 +109,31 @@ export function useMonitor() {
           d.status = 'error'
           d.error = evt.message || 'diagnostic failed'
         },
-        femb_summary: (evt) => {
+        femb_summary_start: (evt) => {
           _ensureFemb(evt.femb_id).summary = {
-            summary_md: evt.summary_md || '',
+            summary_md: '',
+            n_tests: evt.n_tests ?? 0,
+            n_failed: evt.n_failed ?? 0,
+            passed: !!evt.passed,
+            from_cache: false,
+            femb_run_id: null,
+            streaming: true,
+          }
+        },
+        femb_summary_token: (evt) => {
+          const s = _ensureFemb(evt.femb_id).summary
+          if (s) s.summary_md += evt.text
+        },
+        femb_summary: (evt) => {
+          const f = _ensureFemb(evt.femb_id)
+          f.summary = {
+            summary_md: evt.summary_md || f.summary?.summary_md || '',
             n_tests: evt.n_tests ?? 0,
             n_failed: evt.n_failed ?? 0,
             passed: !!evt.passed,
             from_cache: !!evt.from_cache,
             femb_run_id: evt.femb_run_id ?? null,
+            streaming: false,
           }
         },
         session_complete: (evt) => {

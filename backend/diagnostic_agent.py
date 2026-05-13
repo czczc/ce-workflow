@@ -228,7 +228,7 @@ _SUMMARY_PROMPT = (
 )
 
 
-async def summarize_femb_run(
+async def stream_femb_summary(
     *,
     femb_id: str,
     femb_serial: str,
@@ -238,8 +238,11 @@ async def summarize_femb_run(
     passed: bool,
     failed_tests: list[str],
     final_report_md: str,
-) -> str:
-    """Produce a short Markdown summary of one FEMB's completed run."""
+) -> AsyncIterator[str]:
+    """Yield token strings for a short Markdown summary of one FEMB's run.
+
+    Caller assembles tokens to obtain the final summary string.
+    """
     excerpt = final_report_md[:4000] if final_report_md else ""
     failed_list = ", ".join(failed_tests) if failed_tests else "none"
     user_msg = (
@@ -255,5 +258,7 @@ async def summarize_femb_run(
         SystemMessage(content=_SUMMARY_PROMPT),
         HumanMessage(content=user_msg),
     ]
-    response = await _llm.ainvoke(messages)
-    return getattr(response, "content", "") or ""
+    async for chunk in _llm.astream(messages):
+        text = getattr(chunk, "content", "") or ""
+        if text:
+            yield text
