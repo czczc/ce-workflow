@@ -11,6 +11,7 @@ Usage:
 
 import argparse
 import os
+import random
 import re
 import shutil
 import sys
@@ -20,6 +21,8 @@ from pathlib import Path
 
 REPORT_RE = re.compile(r"^report_FEMB_\d+_t(\d+)_[PF]_S\d+\.md$")
 FINAL_RE = re.compile(r"^Final_Report_FEMB_.*\.md$")
+FEMB_SLOT_RE = re.compile(r"_S(\d+)$")
+N_TESTS = 17
 
 DEFAULT_QC_ROOT = "/Users/chaozhang/tmp/FEMB_QC"
 DEFAULT_SOURCE_REL = (
@@ -88,13 +91,27 @@ def default_dest_name() -> str:
     return f"{now.day:02d}_{now.hour:02d}_{now.minute:02d}_{now.second:02d}_MOCK_LN_QC"
 
 
+def slot_from_subdir(name: str) -> str | None:
+    """Return 'S0' / 'S1' / ... extracted from a FEMB subdir name."""
+    m = FEMB_SLOT_RE.search(name)
+    return f"S{m.group(1)}" if m else None
+
+
+def random_failures(min_count: int = 1, max_count: int = 3) -> list[int]:
+    count = random.randint(min_count, max_count)
+    return sorted(random.sample(range(1, N_TESTS + 1), count))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--source", help="Existing real QC run dir to mirror (default: built-in example under $QC_ROOT)")
     parser.add_argument("--dest", help="Destination dir name under Time_<YYYY>_<MM>/, or absolute path (default: auto-named with current timestamp)")
-    parser.add_argument("--interval", type=float, default=10.0, help="Seconds between reports (default: 10)")
-    parser.add_argument("--inject-fail", default="", help="Comma-separated test IDs to flip _P_ to _F_ (e.g. t3,t7)")
+    parser.add_argument("--interval", type=float, default=None, help="Seconds between reports (default: 10, or 2 with --random)")
+    parser.add_argument("--inject-fail", default="", help="Comma-separated test IDs to flip _P_ to _F_ for ALL fembs (e.g. t3,t7)")
+    parser.add_argument("--inject-fail-s0", default=None, help="Per-slot override for S0 (overrides --inject-fail for that slot)")
+    parser.add_argument("--inject-fail-s1", default=None, help="Per-slot override for S1 (overrides --inject-fail for that slot)")
     parser.add_argument("--single-femb", default="", help="Only mirror one FEMB subdir whose name contains this substring (e.g. S0)")
+    parser.add_argument("--random", action="store_true", help="Quick test: random failures per FEMB (1-3 each), default interval=2s")
     parser.add_argument("--qc-root", default=os.environ.get("QC_ROOT", DEFAULT_QC_ROOT))
     args = parser.parse_args()
 
@@ -103,6 +120,15 @@ def main() -> None:
     if not source.is_dir():
         print(f"error: source dir does not exist: {source}", file=sys.stderr)
         sys.exit(1)
+
+    if args.random:
+        if args.inject_fail_s0 is None and args.inject_fail_s1 is None and not args.inject_fail:
+            args.inject_fail_s0 = ",".join(f"t{i}" for i in random_failures())
+            args.inject_fail_s1 = ",".join(f"t{i}" for i in random_failures())
+        if args.interval is None:
+            args.interval = 2.0
+    if args.interval is None:
+        args.interval = 10.0
 
     dest_arg = args.dest or default_dest_name()
     dest_path = Path(dest_arg)
@@ -116,7 +142,12 @@ def main() -> None:
         print(f"error: destination already exists: {dest}", file=sys.stderr)
         sys.exit(1)
 
-    inject_ids = parse_inject_fail(args.inject_fail)
+    global_inject = parse_inject_fail(args.inject_fail)
+    override_by_slot: dict[str, set[int]] = {}
+    if args.inject_fail_s0 is not None:
+        override_by_slot["S0"] = parse_inject_fail(args.inject_fail_s0)
+    if args.inject_fail_s1 is not None:
+        override_by_slot["S1"] = parse_inject_fail(args.inject_fail_s1)
 
     femb_subdirs = discover_femb_subdirs(source)
     if args.single_femb:
@@ -131,34 +162,39 @@ def main() -> None:
     dest.mkdir(parents=True)
     print(f"mock DAQ -> {dest}")
     print(f"source:    {source}")
+    if args.random:
+        print("(random mode)")
 
-    plan: list[tuple[Path, dict[int, Path], Path | None]] = []
+    plan: list[tuple[Path, dict[int, Path], Path | None, set[int], str]] = []
     all_test_ids: set[int] = set()
     for sd in femb_subdirs:
+        slot = slot_from_subdir(sd.name) or "?"
+        inject_ids = override_by_slot.get(slot, global_inject)
         reports = collect_reports(sd)
         final = find_final_report(sd)
         dst_sub = dest / sd.name
         dst_sub.mkdir()
-        plan.append((dst_sub, reports, final))
+        plan.append((dst_sub, reports, final, inject_ids, slot))
         all_test_ids.update(reports.keys())
-        print(f"  femb: {sd.name} ({len(reports)} reports, final={'yes' if final else 'no'})")
+        fails_str = sorted(inject_ids) if inject_ids else "[]"
+        print(f"  femb: {sd.name}  ({slot}, {len(reports)} reports, final={'yes' if final else 'no'}, inject-fail={fails_str})")
 
-    print(f"interval: {args.interval}s, inject-fail: {sorted(inject_ids) or '[]'}")
+    print(f"interval: {args.interval}s")
     print()
 
     for t in sorted(all_test_ids):
         time.sleep(args.interval)
-        injected = t in inject_ids
-        for dst_sub, reports, _ in plan:
+        for dst_sub, reports, _, inject_ids, _ in plan:
             src = reports.get(t)
             if src is None:
                 continue
+            injected = t in inject_ids
             out = write_report(src, dst_sub, injected)
             tag = "FAIL (injected)" if injected else "pass" if "_P_" in out.name else "fail"
             print(f"  + {out.relative_to(dest)}  [{tag}]")
 
     time.sleep(args.interval)
-    for dst_sub, _, final in plan:
+    for dst_sub, _, final, _, _ in plan:
         if final is None:
             continue
         out = dst_sub / final.name
