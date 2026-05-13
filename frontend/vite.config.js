@@ -32,6 +32,10 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         bypass: (req) => req.headers.accept?.includes('text/html') ? '/index.html' : null,
       },
+      '/monitor': {
+        target: 'http://127.0.0.1:8000',
+        bypass: (req) => req.headers.accept?.includes('text/html') ? '/index.html' : null,
+      },
     },
   },
 })

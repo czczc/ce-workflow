@@ -1,0 +1,364 @@
+"""File-watching monitor for real QC runs.
+
+Watches a single run directory under $QC_ROOT/Report/Time_*/ and streams
+SSE events as the DAQ drops report_*.md and Final_Report_*.md files.
+
+Pure async; no LangGraph. The diagnostic subgraph is wired in slice #60.
+"""
+
+import asyncio
+import base64
+import os
+import re
+import threading
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import AsyncIterator
+
+from watchdog.events import FileSystemEvent, FileSystemEventHandler
+from watchdog.observers import Observer
+
+from config import settings
+from sse import DONE, event
+
+# ─── Filename / dir-name patterns ──────────────────────────────────────────
+
+REPORT_RE = re.compile(r"^report_FEMB_\d+_t(\d+)_([PF])_S(\d+)\.md$")
+FINAL_RE = re.compile(r"^Final_Report_FEMB_(.+)\.md$")
+TIME_DIR_RE = re.compile(r"^Time_(\d{4})_(\d{2})$")
+RUN_DIR_PREFIX_RE = re.compile(r"^(\d{2})_(\d{2})_(\d{2})_(\d{2})_(.+)$")
+FEMB_SUBDIR_RE = re.compile(r"^FEMB(.+?)_S(\d+)$")
+
+DEBOUNCE_S = 0.1
+
+
+# ─── Session metadata ──────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class FembInfo:
+    femb_id: str           # "S0" / "S1"
+    serial: str            # "BNL_FEMB_IO-1865-1L_00010"
+    subdir: str            # FEMB subdir name within the run dir
+
+    def to_json(self) -> dict:
+        return {"femb_id": self.femb_id, "serial": self.serial, "subdir": self.subdir}
+
+
+@dataclass(frozen=True)
+class SessionMeta:
+    session_id: str        # opaque, urlsafe base64 of the rel_path under $QC_ROOT/Report/
+    rel_path: str          # "Time_2026_05/10_02_58_23_..."
+    abs_path: Path
+    dir_name: str
+    started_at: str | None # ISO8601 or None if unparseable
+    test_type_hint: str    # tail of dir name after the timestamp portion
+    fembs: list[FembInfo]
+    in_progress: bool      # True if any FEMB lacks a Final_Report
+
+    def to_json(self) -> dict:
+        return {
+            "session_id": self.session_id,
+            "rel_path": self.rel_path,
+            "dir_name": self.dir_name,
+            "started_at": self.started_at,
+            "test_type_hint": self.test_type_hint,
+            "fembs": [f.to_json() for f in self.fembs],
+            "in_progress": self.in_progress,
+        }
+
+
+# ─── ID encoding ───────────────────────────────────────────────────────────
+
+def _encode_session_id(rel_path: str) -> str:
+    return base64.urlsafe_b64encode(rel_path.encode()).decode().rstrip("=")
+
+
+def _decode_session_id(sid: str) -> str:
+    pad = "=" * (-len(sid) % 4)
+    return base64.urlsafe_b64decode(sid + pad).decode()
+
+
+# ─── Parsers ───────────────────────────────────────────────────────────────
+
+def _parse_time_parent(parent_name: str) -> tuple[int, int] | None:
+    m = TIME_DIR_RE.match(parent_name)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+def _parse_run_dir_name(name: str, year: int, month: int) -> tuple[str | None, str]:
+    """Return (iso_started_at, test_type_hint). Tolerant of unknown suffixes."""
+    m = RUN_DIR_PREFIX_RE.match(name)
+    if not m:
+        return None, name
+    dd, hh, mm, ss, tail = m.groups()
+    try:
+        dt = datetime(year, month, int(dd), int(hh), int(mm), int(ss))
+        iso = dt.isoformat()
+    except ValueError:
+        iso = None
+    # test_type_hint = last 1–2 underscore-separated tokens of the tail (e.g. "LN_QC")
+    parts = tail.rsplit("_", 2)
+    if len(parts) >= 2:
+        hint = "_".join(parts[-2:]) if parts[-2].isupper() and parts[-2].isalpha() else parts[-1]
+    else:
+        hint = tail
+    return iso, hint
+
+
+def _discover_fembs(run_dir: Path) -> list[FembInfo]:
+    fembs: list[FembInfo] = []
+    if not run_dir.is_dir():
+        return fembs
+    for entry in sorted(run_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        m = FEMB_SUBDIR_RE.match(entry.name)
+        if not m:
+            continue
+        serial, slot = m.groups()
+        fembs.append(FembInfo(femb_id=f"S{slot}", serial=serial, subdir=entry.name))
+    return fembs
+
+
+def _has_final_report(femb_dir: Path) -> bool:
+    if not femb_dir.is_dir():
+        return False
+    return any(FINAL_RE.match(p.name) for p in femb_dir.iterdir())
+
+
+def _build_session_meta(rel_path: str, abs_path: Path) -> SessionMeta | None:
+    parent_name = Path(rel_path).parent.name
+    parsed = _parse_time_parent(parent_name)
+    started_at: str | None = None
+    hint = abs_path.name
+    if parsed is not None:
+        year, month = parsed
+        started_at, hint = _parse_run_dir_name(abs_path.name, year, month)
+
+    fembs = _discover_fembs(abs_path)
+    in_progress = any(not _has_final_report(abs_path / f.subdir) for f in fembs) or not fembs
+
+    return SessionMeta(
+        session_id=_encode_session_id(rel_path),
+        rel_path=rel_path,
+        abs_path=abs_path,
+        dir_name=abs_path.name,
+        started_at=started_at,
+        test_type_hint=hint,
+        fembs=fembs,
+        in_progress=in_progress,
+    )
+
+
+# ─── Sessions listing ──────────────────────────────────────────────────────
+
+def list_sessions() -> list[dict]:
+    """Scan $QC_ROOT/Report/Time_*/ and return parsed session metadata, newest first."""
+    qc_root = Path(settings.qc_root).resolve()
+    report_root = qc_root / "Report"
+    if not report_root.is_dir():
+        return []
+
+    out: list[SessionMeta] = []
+    for time_dir in report_root.iterdir():
+        if not time_dir.is_dir() or not TIME_DIR_RE.match(time_dir.name):
+            continue
+        for run_dir in time_dir.iterdir():
+            if not run_dir.is_dir():
+                continue
+            rel = f"{time_dir.name}/{run_dir.name}"
+            meta = _build_session_meta(rel, run_dir.resolve())
+            if meta is not None:
+                out.append(meta)
+
+    # newest first by started_at (None last)
+    out.sort(key=lambda m: m.started_at or "", reverse=True)
+    return [m.to_json() for m in out]
+
+
+def get_session(session_id: str) -> SessionMeta | None:
+    qc_root = Path(settings.qc_root).resolve()
+    try:
+        rel_path = _decode_session_id(session_id)
+    except Exception:
+        return None
+    abs_path = (qc_root / "Report" / rel_path).resolve()
+    # safety: must be under qc_root/Report
+    try:
+        abs_path.relative_to(qc_root / "Report")
+    except ValueError:
+        return None
+    if not abs_path.is_dir():
+        return None
+    return _build_session_meta(rel_path, abs_path)
+
+
+# ─── Watcher: bridge watchdog → asyncio.Queue ──────────────────────────────
+
+class _AsyncEventBridge(FileSystemEventHandler):
+    def __init__(self, loop: asyncio.AbstractEventLoop, queue: asyncio.Queue):
+        self.loop = loop
+        self.queue = queue
+        self._last_seen: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def _emit(self, path: str, kind: str) -> None:
+        # Debounce per-path; drop duplicates within DEBOUNCE_S
+        now = self.loop.time() if self.loop.is_running() else 0.0
+        with self._lock:
+            last = self._last_seen.get(path, 0.0)
+            if now - last < DEBOUNCE_S:
+                return
+            self._last_seen[path] = now
+        try:
+            self.loop.call_soon_threadsafe(self.queue.put_nowait, (path, kind))
+        except RuntimeError:
+            pass  # loop closed during shutdown
+
+    def on_created(self, ev: FileSystemEvent) -> None:
+        if not ev.is_directory:
+            self._emit(str(ev.src_path), "created")
+
+    def on_modified(self, ev: FileSystemEvent) -> None:
+        # On some platforms a new file fires modified before/after created.
+        if not ev.is_directory:
+            self._emit(str(ev.src_path), "modified")
+
+    def on_moved(self, ev: FileSystemEvent) -> None:
+        if not ev.is_directory:
+            self._emit(str(getattr(ev, "dest_path", ev.src_path)), "moved")
+
+
+def _classify_file(abs_path: Path, meta: SessionMeta) -> dict | None:
+    """Return an SSE event payload if path matches a watched filename, else None."""
+    try:
+        rel = abs_path.relative_to(meta.abs_path)
+    except ValueError:
+        return None
+    parts = rel.parts
+    if len(parts) != 2:
+        return None
+    femb_subdir, fname = parts
+
+    femb = next((f for f in meta.fembs if f.subdir == femb_subdir), None)
+    if femb is None:
+        return None
+
+    m = REPORT_RE.match(fname)
+    if m:
+        t_num, pf, slot = m.groups()
+        return {
+            "type": "test_pass" if pf == "P" else "test_fail",
+            "femb_id": femb.femb_id,
+            "test_id": f"t{int(t_num)}",
+            "file": str(rel),
+        }
+    if FINAL_RE.match(fname):
+        return {
+            "type": "final_report",
+            "femb_id": femb.femb_id,
+            "file": str(rel),
+        }
+    return None
+
+
+def _existing_events(meta: SessionMeta) -> list[dict]:
+    """Snapshot of events for files already on disk, in canonical order."""
+    out: list[tuple[int, dict]] = []
+    for femb in meta.fembs:
+        femb_dir = meta.abs_path / femb.subdir
+        if not femb_dir.is_dir():
+            continue
+        finals: list[dict] = []
+        for f in femb_dir.iterdir():
+            if not f.is_file():
+                continue
+            payload = _classify_file(f.resolve(), meta)
+            if payload is None:
+                continue
+            if payload["type"] == "final_report":
+                finals.append(payload)
+            else:
+                t = int(payload["test_id"].lstrip("t"))
+                out.append((t, payload))
+        for fin in finals:
+            out.append((9999, fin))  # finals sort to the end per FEMB
+    out.sort(key=lambda x: x[0])
+    return [p for _, p in out]
+
+
+def _all_fembs_finalized(meta: SessionMeta) -> bool:
+    if not meta.fembs:
+        return False
+    return all(_has_final_report(meta.abs_path / f.subdir) for f in meta.fembs)
+
+
+async def watch_session(session_id: str) -> AsyncIterator[str]:
+    """SSE generator: emits session_info, per-file events, ends on final reports."""
+    meta = get_session(session_id)
+    if meta is None:
+        yield event({"type": "error", "message": "session not found"})
+        yield DONE
+        return
+
+    yield event({"type": "session_info", **meta.to_json()})
+
+    seen_paths: set[str] = set()
+    finalized: set[str] = set()
+
+    # 1) Replay existing files first
+    for payload in _existing_events(meta):
+        seen_paths.add(payload["file"])
+        if payload["type"] == "final_report":
+            finalized.add(payload["femb_id"])
+        yield event(payload)
+
+    if _all_fembs_finalized(meta):
+        yield DONE
+        return
+
+    # 2) Live watch for new files
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+    handler = _AsyncEventBridge(loop, queue)
+    observer = Observer()
+    observer.schedule(handler, str(meta.abs_path), recursive=True)
+    observer.start()
+
+    try:
+        while True:
+            try:
+                abs_str, _kind = await asyncio.wait_for(queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                if _all_fembs_finalized(meta):
+                    break
+                continue
+
+            abs_path = Path(abs_str)
+            payload = _classify_file(abs_path, meta)
+            if payload is None:
+                continue
+            if payload["file"] in seen_paths:
+                continue
+            seen_paths.add(payload["file"])
+
+            yield event(payload)
+
+            if payload["type"] == "final_report":
+                finalized.add(payload["femb_id"])
+                if _all_fembs_finalized(meta):
+                    break
+    except asyncio.CancelledError:
+        # Client disconnected; clean up and propagate
+        raise
+    finally:
+        observer.stop()
+        try:
+            await asyncio.to_thread(observer.join, 2.0)
+        except Exception:
+            pass
+
+    yield DONE

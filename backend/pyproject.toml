@@ -19,4 +19,5 @@ dependencies = [
     "qdrant-client>=1.17.1",
     "sentence-transformers>=3.0.0",
     "uvicorn>=0.32.0",
+    "watchdog>=4.0.0",
 ]

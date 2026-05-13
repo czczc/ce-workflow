@@ -58,6 +58,7 @@ const version = __APP_VERSION__
 
 const navLinks = [
   { to: '/chat',      label: 'Console' },
+  { to: '/monitor',   label: 'Monitor' },
   { to: '/documents', label: 'Documents' },
   { to: '/reports',   label: 'Reports' },
 ]

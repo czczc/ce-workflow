@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from catalog_agent import call_mcp_tool, get_report, list_reports
 from config import settings
 from document_store import DocumentStore
+from monitor_session import list_sessions, watch_session
 from pipeline import run_pipeline
 from rag_pipeline import ingest, query
 
@@ -293,3 +294,17 @@ async def get_report_detail(report_id: int):
 async def list_documents():
     store = DocumentStore()
     return store.list_documents()
+
+
+@app.get("/monitor/sessions")
+async def monitor_sessions():
+    return list_sessions()
+
+
+@app.get("/monitor/sessions/{session_id}/stream")
+async def monitor_session_stream(session_id: str):
+    return StreamingResponse(
+        watch_session(session_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
