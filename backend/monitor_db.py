@@ -6,6 +6,7 @@ remain owned by the demo pipeline and are not touched here.
 """
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from config import settings
@@ -30,6 +31,15 @@ _SCHEMA = """
         diagnostic_md TEXT,
         UNIQUE (session_id, femb_id)
     );
+    CREATE TABLE IF NOT EXISTS femb_session_chats (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL REFERENCES femb_sessions(id),
+        role       TEXT    NOT NULL,
+        content    TEXT    NOT NULL,
+        ts         TEXT    NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_femb_session_chats_session
+        ON femb_session_chats(session_id);
 """
 
 
@@ -141,6 +151,35 @@ class MonitorStore:
             "UPDATE femb_runs SET diagnostic_md = ? WHERE id = ?",
             (diagnostic_md, femb_run_id),
         )
+        conn.commit()
+        conn.close()
+
+    def add_chat_message(self, session_id: int, role: str, content: str) -> int:
+        ts = datetime.now(timezone.utc).isoformat()
+        conn = self._open()
+        cur = conn.execute(
+            "INSERT INTO femb_session_chats (session_id, role, content, ts) "
+            "VALUES (?, ?, ?, ?) RETURNING id",
+            (session_id, role, content, ts),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        conn.close()
+        return row["id"]
+
+    def get_chat_history(self, session_id: int) -> list[dict]:
+        conn = self._open()
+        rows = conn.execute(
+            "SELECT id, role, content, ts FROM femb_session_chats "
+            "WHERE session_id = ? ORDER BY id ASC",
+            (session_id,),
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    def clear_chat_history(self, session_id: int) -> None:
+        conn = self._open()
+        conn.execute("DELETE FROM femb_session_chats WHERE session_id = ?", (session_id,))
         conn.commit()
         conn.close()
 

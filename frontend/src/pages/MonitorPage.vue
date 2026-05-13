@@ -56,7 +56,7 @@
       </div>
     </div>
 
-    <div class="monitor-body">
+    <div class="monitor-body" :style="bodyStyle">
       <div class="monitor-center">
         <div v-if="error" class="err-box">{{ error }}</div>
         <div v-else-if="!sessionMeta" class="empty-state">
@@ -74,20 +74,82 @@
         </div>
       </div>
 
-      <aside class="monitor-right">
-        <div class="chat-placeholder">
-          <div class="placeholder-title">Session chat</div>
-          <div class="placeholder-body">Chat panel will land in #63.</div>
-        </div>
+      <div
+        v-if="chatOpen"
+        class="resizer"
+        :class="{ dragging: resizing }"
+        @mousedown="startResize"
+        @dblclick="resetWidth"
+        title="Drag to resize · double-click to reset"
+      ></div>
+
+      <aside class="monitor-right" :class="{ collapsed: !chatOpen }">
+        <MonitorChat
+          v-if="chatOpen"
+          :session-id="selectedSessionId"
+          @collapse="chatOpen = false"
+        />
+        <button
+          v-else
+          class="rail-expand-btn"
+          @click="chatOpen = true"
+          title="Open session chat"
+        >
+          <span class="mdi mdi-forum-outline"></span>
+        </button>
       </aside>
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, onBeforeUnmount } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 import { useMonitor } from '../composables/useMonitor'
 import FembTimeline from '../components/monitor/FembTimeline.vue'
+import MonitorChat from '../components/monitor/MonitorChat.vue'
+
+const DEFAULT_CHAT_WIDTH = 400
+const MIN_CHAT_WIDTH = 280
+const MAX_CHAT_WIDTH = 900
+
+const chatOpen = ref(true)
+const chatWidth = ref(Number(localStorage.getItem('monitor.chatWidth')) || DEFAULT_CHAT_WIDTH)
+const resizing = ref(false)
+
+const bodyStyle = computed(() => ({
+  gridTemplateColumns: chatOpen.value
+    ? `1fr 5px ${chatWidth.value}px`
+    : '1fr 36px',
+}))
+
+function startResize(e) {
+  e.preventDefault()
+  const startX = e.clientX
+  const startW = chatWidth.value
+  resizing.value = true
+  document.body.style.cursor = 'ew-resize'
+  document.body.style.userSelect = 'none'
+
+  const onMove = (ev) => {
+    const dx = startX - ev.clientX
+    chatWidth.value = Math.max(MIN_CHAT_WIDTH, Math.min(MAX_CHAT_WIDTH, startW + dx))
+  }
+  const onUp = () => {
+    resizing.value = false
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+    localStorage.setItem('monitor.chatWidth', String(chatWidth.value))
+  }
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
+}
+
+function resetWidth() {
+  chatWidth.value = DEFAULT_CHAT_WIDTH
+  localStorage.setItem('monitor.chatWidth', String(chatWidth.value))
+}
 
 const {
   sessions,
@@ -244,10 +306,37 @@ function formatSessionLabel(s) {
 
 .monitor-body {
   display: grid;
-  grid-template-columns: 1fr 360px;
   gap: 0;
   flex: 1;
   min-height: 0;
+}
+
+.resizer {
+  cursor: ew-resize;
+  background: transparent;
+  border-left: 1px solid var(--line);
+  position: relative;
+  transition: background 120ms;
+}
+.resizer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 24px;
+  border-radius: 2px;
+  background: var(--line-2);
+  transition: background 120ms;
+}
+.resizer:hover,
+.resizer.dragging {
+  background: rgba(14,149,168,0.06);
+}
+.resizer:hover::after,
+.resizer.dragging::after {
+  background: var(--accent);
 }
 
 .monitor-center {
@@ -281,28 +370,37 @@ function formatSessionLabel(s) {
 }
 
 .monitor-right {
-  border-left: 1px solid var(--line);
   background: var(--bg-1);
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  min-width: 0;
 }
+.monitor-right.collapsed {
+  background: var(--bg-0);
+  border-left: 1px solid var(--line);
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 8px;
+}
+.monitor-right > * { flex: 1; min-width: 0; }
 
-.chat-placeholder {
-  padding: 16px;
+.rail-expand-btn {
+  flex: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
   color: var(--ink-2);
+  cursor: pointer;
 }
-.placeholder-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ink-1);
-  margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-.placeholder-body { font-size: 12px; }
+.rail-expand-btn:hover { color: var(--ink-0); background: var(--bg-3); }
+.rail-expand-btn .mdi { font-size: 16px; }
 
 @media (max-width: 1024px) {
-  .monitor-body { grid-template-columns: 1fr; }
-  .monitor-right { border-left: none; border-top: 1px solid var(--line); }
   .femb-cols { grid-template-columns: 1fr; }
 }
 </style>

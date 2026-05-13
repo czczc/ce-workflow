@@ -24,60 +24,37 @@
 
     <!-- Thread -->
     <div class="thread" ref="threadRef">
-      <div v-for="(msg, i) in messages" :key="i" class="msg-row" :class="msg.role">
-        <div class="avatar" :class="msg.role">{{ avatarText(msg.role) }}</div>
-
-        <div class="msg-body">
-          <div class="msg-meta">
-            <span>{{ roleLabel(msg.role) }}</span>
-            <span class="meta-sep">·</span>
-            <span>{{ formatTime(msg.ts) }}</span>
-          </div>
-
-          <div class="bubble" :class="msg.role">
-            <!-- Thinking indicator -->
-            <div v-if="isThinking(i, msg)" class="thinking">
-              <span class="dot"></span>
-              <span class="dot"></span>
-              <span class="dot"></span>
-              <span class="thinking-label">Thinking…</span>
-            </div>
-
-            <!-- Message text -->
-            <template v-else>
-              <div v-if="msg.role === 'agent'" v-html="render(msg.text)" class="md-body" />
-              <div v-else>{{ msg.text }}</div>
-              <span v-if="isStreaming(i, msg)" class="cursor" />
-            </template>
-
-            <!-- Findings card -->
-            <div v-if="msg.findings"
-              class="findings"
-              :class="msg.findings.passed ? 'findings-pass' : 'findings-fail'">
-              <div class="findings-title">
-                <span class="mdi"
-                  :class="msg.findings.passed ? 'mdi-check-circle-outline' : 'mdi-lightning-bolt'">
-                </span>
-                <span>{{ msg.findings.passed
-                  ? 'All Channels Passed'
-                  : `${msg.findings.items.length} Anomalies Detected` }}</span>
-              </div>
-              <div v-for="(item, j) in msg.findings.items" :key="j" class="findings-row">
-                <span class="findings-ch">{{ item.channel }}</span>
-                <span class="findings-desc">{{ item.description }}</span>
-                <span class="severity-badge" :class="`sev-${item.severity}`">{{ item.severity }}</span>
-              </div>
-            </div>
-
-            <!-- Source tags -->
-            <div v-if="msg.sources?.length" class="source-tags">
-              <span v-for="s in msg.sources" :key="s" class="source-tag">
-                <span class="source-dot"></span>{{ s }}
+      <MessageBubble
+        v-for="(msg, i) in messages"
+        :key="i"
+        :role="msg.role"
+        :text="msg.text"
+        :sources="msg.sources"
+        :ts="msg.ts"
+        :streaming="isStreaming(i, msg)"
+        :thinking="isThinking(i, msg)"
+      >
+        <template v-if="msg.findings" #extra>
+          <div
+            class="findings"
+            :class="msg.findings.passed ? 'findings-pass' : 'findings-fail'"
+          >
+            <div class="findings-title">
+              <span class="mdi"
+                :class="msg.findings.passed ? 'mdi-check-circle-outline' : 'mdi-lightning-bolt'">
               </span>
+              <span>{{ msg.findings.passed
+                ? 'All Channels Passed'
+                : `${msg.findings.items.length} Anomalies Detected` }}</span>
+            </div>
+            <div v-for="(item, j) in msg.findings.items" :key="j" class="findings-row">
+              <span class="findings-ch">{{ item.channel }}</span>
+              <span class="findings-desc">{{ item.description }}</span>
+              <span class="severity-badge" :class="`sev-${item.severity}`">{{ item.severity }}</span>
             </div>
           </div>
-        </div>
-      </div>
+        </template>
+      </MessageBubble>
     </div>
 
     <!-- Quick chips -->
@@ -148,9 +125,9 @@
 
 <script setup>
 import { ref, reactive, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
-import { marked } from 'marked'
 import { useSharedSession } from '../composables/useChat.js'
 import { readStream } from '../composables/useStream.js'
+import MessageBubble from './chat/MessageBubble.vue'
 
 const API = ''
 const { messages, streaming } = useSharedSession()
@@ -215,23 +192,6 @@ const CHIPS = [
 watch(() => messages.value.length, scrollToBottom)
 watch(() => messages.value.at(-1)?.text, () => { if (streaming.value) scrollToBottom() })
 
-function avatarText(role) {
-  if (role === 'agent') return 'QC'
-  if (role === 'system') return '◇'
-  return 'Me'
-}
-
-function roleLabel(role) {
-  if (role === 'agent') return 'Agent'
-  if (role === 'system') return 'System'
-  return 'You'
-}
-
-function formatTime(ts) {
-  if (!ts) return ''
-  return new Date(ts).toISOString().slice(11, 19)
-}
-
 function isThinking(i, msg) {
   return streaming.value
     && i === messages.value.length - 1
@@ -244,10 +204,6 @@ function isStreaming(i, msg) {
     && i === messages.value.length - 1
     && msg.role === 'agent'
     && !!msg.text
-}
-
-function render(text) {
-  return text ? marked.parse(text) : ''
 }
 
 function scrollToBottom() {

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from catalog_agent import call_mcp_tool, get_report, list_reports
 from config import settings
 from document_store import DocumentStore
+import monitor_chat
 import monitor_db
 from monitor_session import list_sessions, regenerate_diagnostic_stream, watch_session
 from pipeline import run_pipeline
@@ -318,6 +319,34 @@ async def regenerate_femb_diagnostic(run_id: int, test_id: str | None = Query(No
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+class MonitorChatRequest(BaseModel):
+    message: str
+
+
+@app.post("/monitor/sessions/{session_id}/chat")
+async def monitor_chat_stream(session_id: str, body: MonitorChatRequest):
+    if not body.message.strip():
+        raise HTTPException(status_code=400, detail="empty message")
+    return StreamingResponse(
+        monitor_chat.stream_chat(session_id, body.message),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/monitor/sessions/{session_id}/chat")
+async def monitor_chat_history(session_id: str):
+    return monitor_chat.get_chat_history(session_id)
+
+
+@app.delete("/monitor/sessions/{session_id}/chat")
+async def monitor_chat_clear(session_id: str):
+    ok = monitor_chat.clear_chat_history(session_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"ok": True}
 
 
 @app.delete("/monitor/femb-runs/{run_id}/diagnostic")
