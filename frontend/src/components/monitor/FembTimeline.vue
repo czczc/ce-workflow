@@ -64,6 +64,21 @@
         </div>
       </div>
     </div>
+
+    <div v-if="state.summary" class="summary-card" :class="state.summary.passed ? 'pass' : 'fail'">
+      <div class="summary-head">
+        <span class="mdi" :class="state.summary.passed ? 'mdi-clipboard-check-outline' : 'mdi-clipboard-alert-outline'"></span>
+        <span class="summary-title">run summary</span>
+        <span class="summary-stat">
+          {{ state.summary.n_failed }} / {{ state.summary.n_tests }} failed
+        </span>
+        <span v-if="state.summary.from_cache" class="cache-chip" title="loaded from saved record">cached</span>
+      </div>
+      <div
+        class="summary-body markdown-body"
+        v-html="renderMarkdown(state.summary.summary_md)"
+      ></div>
+    </div>
   </div>
 </template>
 
@@ -86,9 +101,13 @@ const anyFail = computed(() =>
   Object.values(props.state.tests || {}).some((v) => v === 'fail')
 )
 
-const overallClass = computed(() => (anyFail.value ? 'fail' : 'pass'))
-const overallLabel = computed(() => (anyFail.value ? 'FAIL' : 'PASS'))
-const overallIcon  = computed(() => (anyFail.value ? 'mdi-close-circle' : 'mdi-check-circle'))
+const hasSummary = computed(() => !!props.state.summary)
+const isFail = computed(() =>
+  hasSummary.value ? !props.state.summary.passed : anyFail.value
+)
+const overallClass = computed(() => (isFail.value ? 'fail' : 'pass'))
+const overallLabel = computed(() => (isFail.value ? 'FAIL' : 'PASS'))
+const overallIcon  = computed(() => (isFail.value ? 'mdi-close-circle' : 'mdi-check-circle'))
 
 const diagnosticTestIds = computed(() => {
   const d = props.state.diagnostics || {}
@@ -332,4 +351,60 @@ function renderMarkdown(text) {
   font-size: 11px;
   font-family: 'JetBrains Mono', monospace;
 }
+
+.summary-card {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+}
+.summary-card.pass {
+  border-color: rgba(57, 211, 83, 0.35);
+  background: rgba(57, 211, 83, 0.05);
+}
+.summary-card.fail {
+  border-color: rgba(248, 81, 73, 0.35);
+  background: rgba(248, 81, 73, 0.05);
+}
+
+.summary-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.summary-head .mdi { font-size: 14px; }
+.summary-card.pass .summary-head .mdi { color: var(--ok); }
+.summary-card.fail .summary-head .mdi { color: var(--danger); }
+.summary-title {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-1);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.summary-stat {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.cache-chip {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+.summary-body {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-1);
+}
+.summary-body :deep(p) { margin: 0; }
 </style>

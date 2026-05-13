@@ -5,7 +5,8 @@ export function useMonitor() {
   const sessions = ref([])
   const selectedSessionId = ref('')
   const sessionMeta = ref(null)
-  const eventsByFemb = ref({})  // femb_id -> { tests: { tN: 'pass'|'fail' }, final: bool }
+  const eventsByFemb = ref({})  // femb_id -> { tests, final, diagnostics, summary }
+  const sessionComplete = ref(null) // { finished_at, overall_passed } | null
   const streaming = ref(false)
   const error = ref('')
   let abortCtrl = null
@@ -25,12 +26,18 @@ export function useMonitor() {
   function _resetSessionState() {
     sessionMeta.value = null
     eventsByFemb.value = {}
+    sessionComplete.value = null
     error.value = ''
   }
 
   function _ensureFemb(femb_id) {
     if (!eventsByFemb.value[femb_id]) {
-      eventsByFemb.value[femb_id] = { tests: {}, final: false, diagnostics: {} }
+      eventsByFemb.value[femb_id] = {
+        tests: {},
+        final: false,
+        diagnostics: {},
+        summary: null,   // { summary_md, n_tests, n_failed, passed, from_cache }
+      }
     }
     return eventsByFemb.value[femb_id]
   }
@@ -99,6 +106,21 @@ export function useMonitor() {
           d.status = 'error'
           d.error = evt.message || 'diagnostic failed'
         },
+        femb_summary: (evt) => {
+          _ensureFemb(evt.femb_id).summary = {
+            summary_md: evt.summary_md || '',
+            n_tests: evt.n_tests ?? 0,
+            n_failed: evt.n_failed ?? 0,
+            passed: !!evt.passed,
+            from_cache: !!evt.from_cache,
+          }
+        },
+        session_complete: (evt) => {
+          sessionComplete.value = {
+            finished_at: evt.finished_at,
+            overall_passed: !!evt.overall_passed,
+          }
+        },
         error: (evt) => {
           error.value = evt.message || 'stream error'
         },
@@ -125,6 +147,7 @@ export function useMonitor() {
     sessionMeta,
     fembs,
     eventsByFemb,
+    sessionComplete,
     streaming,
     error,
     loadSessions,

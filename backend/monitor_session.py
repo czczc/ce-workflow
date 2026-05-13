@@ -10,16 +10,18 @@ import asyncio
 import base64
 import re
 import threading
+from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+import monitor_db
 from config import settings
-from diagnostic_agent import run_diagnostic_for_failed_report
+from diagnostic_agent import run_diagnostic_for_failed_report, summarize_femb_run
 from sse import DONE, event
 
 # ─── Filename / dir-name patterns ──────────────────────────────────────────
@@ -156,7 +158,9 @@ def _build_session_meta(rel_path: str, abs_path: Path) -> SessionMeta | None:
 # ─── Sessions listing ──────────────────────────────────────────────────────
 
 def list_sessions() -> list[dict]:
-    """Scan $QC_ROOT/Report/Time_*/ and return parsed session metadata, newest first."""
+    """Scan $QC_ROOT/Report/Time_*/ and return parsed session metadata, newest first.
+    Merges DB state (overall_passed, finished_at, persisted=True) where present.
+    """
     qc_root = Path(settings.qc_root).resolve()
     report_root = qc_root / "Report"
     if not report_root.is_dir():
@@ -176,7 +180,18 @@ def list_sessions() -> list[dict]:
 
     # newest first by started_at (None last)
     out.sort(key=lambda m: m.started_at or "", reverse=True)
-    return [m.to_json() for m in out]
+    result = []
+    for m in out:
+        d = m.to_json()
+        db_row = monitor_db.store.get_session_by_rel_path(m.rel_path)
+        if db_row:
+            d["persisted"] = True
+            d["overall_passed"] = bool(db_row.get("overall_passed"))
+            d["finished_at"] = db_row.get("finished_at")
+        else:
+            d["persisted"] = False
+        result.append(d)
+    return result
 
 
 def get_session(session_id: str) -> SessionMeta | None:
@@ -380,10 +395,103 @@ async def _file_producer(meta: SessionMeta, out: asyncio.Queue) -> None:
             pass
 
 
+async def _finalize_femb(
+    out: asyncio.Queue,
+    meta: SessionMeta,
+    femb_id: str,
+    final_report_rel: str,
+    test_results: dict[str, str],
+    diag_chunks: dict[str, list[str]],
+    diag_tasks_for_femb: set[asyncio.Task],
+) -> None:
+    """Wait for pending diagnostics for this FEMB, summarise, persist, emit."""
+    if diag_tasks_for_femb:
+        await asyncio.gather(*diag_tasks_for_femb, return_exceptions=True)
+
+    femb = next((f for f in meta.fembs if f.femb_id == femb_id), None)
+    serial = femb.serial if femb else ""
+
+    failed_tests = sorted(
+        (tid for tid, v in test_results.items() if v == "fail"),
+        key=lambda t: int(t.lstrip("t")) if t.lstrip("t").isdigit() else 0,
+    )
+    n_tests = len(test_results)
+    n_failed = len(failed_tests)
+    passed = n_failed == 0
+
+    diagnostic_md = "\n\n---\n\n".join(
+        f"### {tid}\n\n{''.join(diag_chunks.get(tid, []))}".strip()
+        for tid in failed_tests if tid in diag_chunks
+    ) or None
+
+    session_db_id = monitor_db.store.upsert_session(meta.rel_path, meta.started_at)
+    existing = monitor_db.store.get_femb_run(session_db_id, femb_id)
+
+    if existing and (existing.get("summary_md") or "").strip():
+        summary_md = existing["summary_md"]
+        diagnostic_md = existing.get("diagnostic_md") or diagnostic_md
+        from_cache = True
+    else:
+        final_md = ""
+        try:
+            full = meta.abs_path / final_report_rel
+            final_md = await asyncio.to_thread(full.read_text, encoding="utf-8")
+        except Exception:
+            pass
+        try:
+            summary_md = await summarize_femb_run(
+                femb_id=femb_id,
+                femb_serial=serial,
+                test_type_hint=meta.test_type_hint,
+                n_tests=n_tests,
+                n_failed=n_failed,
+                passed=passed,
+                failed_tests=failed_tests,
+                final_report_md=final_md,
+            )
+        except Exception as exc:
+            summary_md = f"_summary generation failed: {exc}_"
+        monitor_db.store.upsert_femb_run(
+            session_id=session_db_id,
+            femb_id=femb_id,
+            femb_serial=serial,
+            n_tests=n_tests,
+            n_failed=n_failed,
+            passed=passed,
+            summary_md=summary_md,
+            diagnostic_md=diagnostic_md or "",
+        )
+        from_cache = False
+
+    await out.put({
+        "type": "femb_summary",
+        "femb_id": femb_id,
+        "femb_serial": serial,
+        "n_tests": n_tests,
+        "n_failed": n_failed,
+        "passed": passed,
+        "summary_md": summary_md,
+        "from_cache": from_cache,
+    })
+
+    # If every FEMB in this session is now persisted, complete the session.
+    runs = monitor_db.store.list_femb_runs(session_db_id)
+    if len(runs) >= len(meta.fembs) and meta.fembs:
+        overall_passed = all(r.get("passed") for r in runs)
+        finished_at = datetime.now(timezone.utc).isoformat()
+        monitor_db.store.complete_session(session_db_id, finished_at, overall_passed)
+        await out.put({
+            "type": "session_complete",
+            "finished_at": finished_at,
+            "overall_passed": overall_passed,
+        })
+
+
 async def watch_session(session_id: str) -> AsyncIterator[str]:
-    """SSE generator: emits session_info, per-file events, and per-failure
-    diagnostic events (streamed concurrently). Ends on final reports + all
-    spawned diagnostics complete.
+    """SSE generator: emits session_info, per-file events, per-failure diagnostic
+    events (concurrent), per-FEMB summary on Final_Report, and session_complete
+    when all FEMBs are persisted. Ends after the producer and all spawned tasks
+    finish and the queue is drained.
     """
     meta = get_session(session_id)
     if meta is None:
@@ -391,17 +499,26 @@ async def watch_session(session_id: str) -> AsyncIterator[str]:
         yield DONE
         return
 
+    # Pre-create session row (no-op if exists).
+    monitor_db.store.upsert_session(meta.rel_path, meta.started_at)
+
     yield event({"type": "session_info", **meta.to_json()})
 
     out: asyncio.Queue[dict] = asyncio.Queue()
     file_task = asyncio.create_task(_file_producer(meta, out))
     diag_tasks: set[asyncio.Task] = set()
+    finalize_tasks: set[asyncio.Task] = set()
+
+    test_results: dict[str, dict[str, str]] = defaultdict(dict)
+    diag_chunks: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    diag_tasks_by_femb: dict[str, set[asyncio.Task]] = defaultdict(set)
+    finalized_fembs: set[str] = set()
 
     try:
         while True:
-            # exit when file producer done, no live diag tasks, queue empty
             diag_tasks = {t for t in diag_tasks if not t.done()}
-            if file_task.done() and not diag_tasks and out.empty():
+            finalize_tasks = {t for t in finalize_tasks if not t.done()}
+            if file_task.done() and not diag_tasks and not finalize_tasks and out.empty():
                 break
             try:
                 payload = await asyncio.wait_for(out.get(), timeout=0.2)
@@ -410,15 +527,37 @@ async def watch_session(session_id: str) -> AsyncIterator[str]:
 
             yield event(payload)
 
-            if payload.get("type") == "test_fail":
-                t = asyncio.create_task(_spawn_diagnostic(out, meta, payload))
-                diag_tasks.add(t)
+            ptype = payload.get("type")
+            if ptype == "test_pass":
+                test_results[payload["femb_id"]][payload["test_id"]] = "pass"
+            elif ptype == "test_fail":
+                test_results[payload["femb_id"]][payload["test_id"]] = "fail"
+                dt = asyncio.create_task(_spawn_diagnostic(out, meta, payload))
+                diag_tasks.add(dt)
+                diag_tasks_by_femb[payload["femb_id"]].add(dt)
+            elif ptype == "diagnostic_token":
+                diag_chunks[payload["femb_id"]][payload["test_id"]].append(payload["text"])
+            elif ptype == "final_report":
+                femb_id = payload["femb_id"]
+                if femb_id not in finalized_fembs:
+                    finalized_fembs.add(femb_id)
+                    pending = {t for t in diag_tasks_by_femb[femb_id] if not t.done()}
+                    ft = asyncio.create_task(_finalize_femb(
+                        out=out,
+                        meta=meta,
+                        femb_id=femb_id,
+                        final_report_rel=payload["file"],
+                        test_results=dict(test_results[femb_id]),
+                        diag_chunks=diag_chunks[femb_id],
+                        diag_tasks_for_femb=pending,
+                    ))
+                    finalize_tasks.add(ft)
     except asyncio.CancelledError:
         raise
     finally:
-        for t in [file_task, *diag_tasks]:
+        for t in [file_task, *diag_tasks, *finalize_tasks]:
             if not t.done():
                 t.cancel()
-        await asyncio.gather(file_task, *diag_tasks, return_exceptions=True)
+        await asyncio.gather(file_task, *diag_tasks, *finalize_tasks, return_exceptions=True)
 
     yield DONE

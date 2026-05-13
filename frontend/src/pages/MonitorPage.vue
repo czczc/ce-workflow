@@ -27,6 +27,17 @@
           <span class="mdi mdi-flask-outline"></span>
           {{ sessionMeta.test_type_hint }}
         </span>
+        <span
+          v-if="sessionComplete"
+          class="meta-chip"
+          :class="sessionComplete.overall_passed ? 'pass' : 'fail'"
+        >
+          <span
+            class="mdi"
+            :class="sessionComplete.overall_passed ? 'mdi-check-circle-outline' : 'mdi-close-circle-outline'"
+          ></span>
+          {{ sessionComplete.overall_passed ? 'session passed' : 'session failed' }}
+        </span>
         <span class="meta-chip" :class="streaming ? 'live' : ''">
           <span class="dot" :class="streaming ? 'live' : 'idle'"></span>
           {{ streaming ? 'watching' : 'idle' }}
@@ -82,6 +93,7 @@ const {
   sessionMeta,
   fembs,
   eventsByFemb,
+  sessionComplete,
   streaming,
   error,
   loadSessions,
@@ -102,7 +114,14 @@ function onPickSession(sid) {
 }
 
 function formatSessionLabel(s) {
-  const status = s.in_progress ? '● running' : '○ done'
+  let status
+  if (s.persisted) {
+    status = s.overall_passed ? '✓ pass' : '✗ fail'
+  } else if (s.in_progress) {
+    status = '● running'
+  } else {
+    status = '○ unsaved'
+  }
   const ts = s.started_at ? s.started_at.replace('T', ' ') : '—'
   return `${ts}  ·  ${s.test_type_hint}  ·  ${status}`
 }
@@ -182,6 +201,18 @@ function formatSessionLabel(s) {
   border-radius: 999px;
 }
 .meta-chip.live { color: var(--info); border-color: rgba(56, 139, 253, 0.4); }
+.meta-chip.pass {
+  color: var(--ok);
+  border-color: rgba(57, 211, 83, 0.4);
+  background: rgba(57, 211, 83, 0.08);
+}
+.meta-chip.fail {
+  color: var(--danger);
+  border-color: rgba(248, 81, 73, 0.4);
+  background: rgba(248, 81, 73, 0.08);
+}
+.meta-chip.pass .mdi { color: var(--ok); }
+.meta-chip.fail .mdi { color: var(--danger); }
 .meta-chip .mdi { font-size: 13px; color: var(--ink-2); }
 
 .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }

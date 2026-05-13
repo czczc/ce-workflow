@@ -217,3 +217,43 @@ async def run_diagnostic_for_failed_report(
                 "test_id": test_id,
                 "text": text,
             }
+
+
+_SUMMARY_PROMPT = (
+    "You are summarising a completed FEMB QC run for a record book. Write "
+    "ONE short paragraph (2–3 sentences, ~50 words). State the overall "
+    "outcome (PASS/FAIL), how many tests failed if any, and the single most "
+    "important takeaway. Do not pad with generic advice or repeat the action "
+    "list. Do not start with a heading."
+)
+
+
+async def summarize_femb_run(
+    *,
+    femb_id: str,
+    femb_serial: str,
+    test_type_hint: str,
+    n_tests: int,
+    n_failed: int,
+    passed: bool,
+    failed_tests: list[str],
+    final_report_md: str,
+) -> str:
+    """Produce a short Markdown summary of one FEMB's completed run."""
+    excerpt = final_report_md[:4000] if final_report_md else ""
+    failed_list = ", ".join(failed_tests) if failed_tests else "none"
+    user_msg = (
+        f"FEMB **{femb_serial or femb_id}** (slot `{femb_id}`) "
+        f"run type `{test_type_hint or 'unknown'}` — "
+        f"{'PASS' if passed else 'FAIL'} "
+        f"({n_failed}/{n_tests} tests failed). "
+        f"Failed tests: {failed_list}.\n\n"
+        f"### Final report (excerpt)\n```markdown\n{excerpt}\n```\n\n"
+        "Summarise this run per your instructions."
+    )
+    messages = [
+        SystemMessage(content=_SUMMARY_PROMPT),
+        HumanMessage(content=user_msg),
+    ]
+    response = await _llm.ainvoke(messages)
+    return getattr(response, "content", "") or ""
