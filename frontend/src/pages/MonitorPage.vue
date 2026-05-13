@@ -67,7 +67,9 @@
             v-for="f in fembs"
             :key="f.femb_id"
             :femb="f"
-            :state="eventsByFemb[f.femb_id] || { tests: {}, final: false }"
+            :state="eventsByFemb[f.femb_id] || { tests: {}, final: false, diagnostics: {} }"
+            :on-regenerate="regenerateDiagnostic"
+            :on-clear="clearDiagnostic"
           />
         </div>
       </div>
@@ -99,6 +101,8 @@ const {
   loadSessions,
   startWatching,
   stopWatching,
+  regenerateDiagnostic,
+  clearDiagnostic,
 } = useMonitor()
 
 onMounted(() => loadSessions())

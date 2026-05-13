@@ -32,6 +32,32 @@
       </div>
     </div>
 
+    <div v-if="hasFailures" class="diag-header">
+      <span class="diag-header-title">
+        {{ failureCount }} failure{{ failureCount === 1 ? '' : 's' }} — diagnostics
+      </span>
+      <div v-if="canEditDiagnostics" class="diag-actions">
+        <button
+          class="action-btn"
+          :disabled="regeneratingAll"
+          @click="onRegenerateAll"
+          title="Re-run the diagnostic LLM for every failed test of this FEMB"
+        >
+          <span class="mdi mdi-refresh"></span>
+          <span>{{ regeneratingAll ? 'regenerating…' : 'regenerate all' }}</span>
+        </button>
+        <button
+          class="action-btn"
+          :disabled="regeneratingAll"
+          @click="onClearAll"
+          title="Delete all saved diagnostics for this FEMB without regenerating"
+        >
+          <span class="mdi mdi-trash-can-outline"></span>
+          <span>clear all</span>
+        </button>
+      </div>
+    </div>
+
     <div v-if="diagnosticTestIds.length" class="diag-list">
       <div
         v-for="testId in diagnosticTestIds"
@@ -46,6 +72,24 @@
             <span v-if="state.diagnostics[testId]?.status === 'streaming'" class="dot pulse"></span>
             {{ state.diagnostics[testId]?.status || 'pending' }}
           </span>
+          <div v-if="canEditDiagnostics" class="card-actions">
+            <button
+              class="card-btn"
+              :disabled="isRegenerating(testId)"
+              @click="onRegenerateCard(testId)"
+              :title="`Regenerate just ${testId}`"
+            >
+              <span class="mdi mdi-refresh"></span>
+            </button>
+            <button
+              class="card-btn"
+              :disabled="isRegenerating(testId)"
+              @click="onClearCard(testId)"
+              :title="`Delete just ${testId}'s diagnostic`"
+            >
+              <span class="mdi mdi-close"></span>
+            </button>
+          </div>
         </div>
         <div v-if="state.diagnostics[testId]?.sources?.length" class="diag-sources">
           <span class="src-label">sources</span>
@@ -83,14 +127,56 @@
 </template>
 
 <script setup>
-import { computed, nextTick } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { marked } from 'marked'
 
 const props = defineProps({
   femb: { type: Object, required: true },         // { femb_id, serial, subdir }
-  state: { type: Object, required: true },        // { tests: {tN: 'pass'|'fail'}, final: bool, diagnostics: {tN: {...}} }
+  state: { type: Object, required: true },        // { tests, final, diagnostics, summary }
   totalSlots: { type: Number, default: 17 },
+  onRegenerate: { type: Function, default: null }, // async (fembRunId, fembId) => void
+  onClear:      { type: Function, default: null }, // (fembRunId, fembId) => void
 })
+
+const regeneratingAll = ref(false)
+const regeneratingCards = ref(new Set())  // test_ids currently regenerating individually
+
+const canEditDiagnostics = computed(
+  () => !!props.state.summary?.femb_run_id && (props.onRegenerate || props.onClear)
+)
+const failureCount = computed(() => props.state.summary?.n_failed ?? diagnosticTestIds.value.length)
+const hasFailures = computed(() => failureCount.value > 0)
+
+function isRegenerating(testId) {
+  return regeneratingAll.value || regeneratingCards.value.has(testId)
+}
+
+async function onRegenerateAll() {
+  if (!props.onRegenerate || !props.state.summary?.femb_run_id) return
+  regeneratingAll.value = true
+  try {
+    await props.onRegenerate(props.state.summary.femb_run_id, props.femb.femb_id, null)
+  } finally {
+    regeneratingAll.value = false
+  }
+}
+function onClearAll() {
+  if (!props.onClear || !props.state.summary?.femb_run_id) return
+  props.onClear(props.state.summary.femb_run_id, props.femb.femb_id, null)
+}
+async function onRegenerateCard(testId) {
+  if (!props.onRegenerate || !props.state.summary?.femb_run_id) return
+  regeneratingCards.value.add(testId)
+  try {
+    await props.onRegenerate(props.state.summary.femb_run_id, props.femb.femb_id, testId)
+  } finally {
+    regeneratingCards.value.delete(testId)
+  }
+}
+function onClearCard(testId) {
+  if (!props.onClear || !props.state.summary?.femb_run_id) return
+  props.onClear(props.state.summary.femb_run_id, props.femb.femb_id, testId)
+}
 
 const doneCount = computed(() =>
   Object.keys(props.state.tests || {}).length
@@ -261,7 +347,6 @@ function renderMarkdown(text) {
 .cell.fail:hover { border-color: var(--danger); }
 
 .diag-list {
-  margin-top: 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -390,6 +475,70 @@ function renderMarkdown(text) {
   font-size: 11px;
   color: var(--ink-2);
 }
+
+.diag-header {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.diag-header-title {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.diag-actions {
+  display: flex;
+  gap: 4px;
+}
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--ink-1);
+  cursor: pointer;
+  font-family: inherit;
+}
+.action-btn:hover:not(:disabled) {
+  color: var(--ink-0);
+  background: var(--bg-3);
+}
+.action-btn:disabled { opacity: 0.4; cursor: wait; }
+.action-btn .mdi { font-size: 13px; }
+
+.card-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: 4px;
+}
+.card-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.card-btn:hover:not(:disabled) {
+  color: var(--ink-0);
+  background: var(--bg-2);
+}
+.card-btn:disabled { opacity: 0.35; cursor: wait; }
+.card-btn .mdi { font-size: 13px; }
 .cache-chip {
   font-size: 9px;
   text-transform: uppercase;

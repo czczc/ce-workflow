@@ -88,6 +88,12 @@ class MonitorStore:
         conn.close()
         return dict(row) if row else None
 
+    def get_femb_run_by_id(self, run_id: int) -> dict | None:
+        conn = self._open()
+        row = conn.execute("SELECT * FROM femb_runs WHERE id = ?", (run_id,)).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
     def list_femb_runs(self, session_id: int) -> list[dict]:
         conn = self._open()
         rows = conn.execute(

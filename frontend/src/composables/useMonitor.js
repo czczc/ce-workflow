@@ -51,6 +51,7 @@ export function useMonitor() {
         chunks: [],
         text: '',
         error: '',
+        cached: false,
       }
     }
     return f.diagnostics[test_id]
@@ -86,7 +87,9 @@ export function useMonitor() {
           _ensureFemb(evt.femb_id).final = true
         },
         diagnostic_start: (evt) => {
-          _ensureDiag(evt.femb_id, evt.test_id).status = 'streaming'
+          const d = _ensureDiag(evt.femb_id, evt.test_id)
+          d.status = 'streaming'
+          d.cached = !!evt.cached
         },
         diagnostic_sources: (evt) => {
           _ensureDiag(evt.femb_id, evt.test_id).sources = evt.sources || []
@@ -113,6 +116,7 @@ export function useMonitor() {
             n_failed: evt.n_failed ?? 0,
             passed: !!evt.passed,
             from_cache: !!evt.from_cache,
+            femb_run_id: evt.femb_run_id ?? null,
           }
         },
         session_complete: (evt) => {
@@ -141,6 +145,86 @@ export function useMonitor() {
     streaming.value = false
   }
 
+  function _resetDiagForRegen(femb_id, test_ids) {
+    const f = _ensureFemb(femb_id)
+    for (const tid of test_ids) {
+      f.diagnostics[tid] = {
+        status: 'streaming',
+        sources: [],
+        chunks: [],
+        text: '',
+        error: '',
+        cached: false,
+      }
+    }
+  }
+
+  async function regenerateDiagnostic(fembRunId, fembId, testId = null) {
+    const fembState = _ensureFemb(fembId)
+    // Mark targeted card(s) as streaming
+    const targets = testId ? [testId] : Object.keys(fembState.diagnostics)
+    _resetDiagForRegen(fembId, targets)
+
+    const url = testId
+      ? `/monitor/femb-runs/${fembRunId}/diagnostic/regenerate?test_id=${encodeURIComponent(testId)}`
+      : `/monitor/femb-runs/${fembRunId}/diagnostic/regenerate`
+    try {
+      const resp = await fetch(url, { method: 'POST' })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      await readStream(resp, {
+        regenerate_start: () => {},
+        diagnostic_start: (evt) => {
+          const d = _ensureDiag(evt.femb_id, evt.test_id)
+          d.status = 'streaming'
+          d.text = ''
+          d.cached = false
+        },
+        diagnostic_sources: (evt) => {
+          _ensureDiag(evt.femb_id, evt.test_id).sources = evt.sources || []
+        },
+        diagnostic_retrieval: (evt) => {
+          _ensureDiag(evt.femb_id, evt.test_id).chunks = evt.chunks || []
+        },
+        diagnostic_token: (evt) => {
+          _ensureDiag(evt.femb_id, evt.test_id).text += evt.text
+        },
+        diagnostic_done: (evt) => {
+          const d = _ensureDiag(evt.femb_id, evt.test_id)
+          if (d.status !== 'error') d.status = 'done'
+        },
+        diagnostic_error: (evt) => {
+          const d = _ensureDiag(evt.femb_id, evt.test_id)
+          d.status = 'error'
+          d.error = evt.message || 'diagnostic failed'
+        },
+        regenerate_complete: () => {},
+        error: (evt) => {
+          error.value = evt.message || 'regenerate failed'
+        },
+      })
+    } catch (e) {
+      error.value = `Regenerate failed: ${e.message}`
+    }
+  }
+
+  async function clearDiagnostic(fembRunId, fembId, testId = null) {
+    const url = testId
+      ? `/monitor/femb-runs/${fembRunId}/diagnostic?test_id=${encodeURIComponent(testId)}`
+      : `/monitor/femb-runs/${fembRunId}/diagnostic`
+    try {
+      const resp = await fetch(url, { method: 'DELETE' })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const fembState = _ensureFemb(fembId)
+      if (testId) {
+        delete fembState.diagnostics[testId]
+      } else {
+        fembState.diagnostics = {}
+      }
+    } catch (e) {
+      error.value = `Clear failed: ${e.message}`
+    }
+  }
+
   return {
     sessions,
     selectedSessionId,
@@ -153,5 +237,7 @@ export function useMonitor() {
     loadSessions,
     startWatching,
     stopWatching,
+    regenerateDiagnostic,
+    clearDiagnostic,
   }
 }

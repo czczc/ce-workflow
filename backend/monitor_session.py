@@ -431,6 +431,7 @@ async def _finalize_femb(
         summary_md = existing["summary_md"]
         diagnostic_md = existing.get("diagnostic_md") or diagnostic_md
         from_cache = True
+        femb_run_id = existing["id"]
     else:
         final_md = ""
         try:
@@ -451,7 +452,7 @@ async def _finalize_femb(
             )
         except Exception as exc:
             summary_md = f"_summary generation failed: {exc}_"
-        monitor_db.store.upsert_femb_run(
+        femb_run_id = monitor_db.store.upsert_femb_run(
             session_id=session_db_id,
             femb_id=femb_id,
             femb_serial=serial,
@@ -472,6 +473,7 @@ async def _finalize_femb(
         "passed": passed,
         "summary_md": summary_md,
         "from_cache": from_cache,
+        "femb_run_id": femb_run_id,
     })
 
     # If every FEMB in this session is now persisted, complete the session.
@@ -484,6 +486,225 @@ async def _finalize_femb(
             "type": "session_complete",
             "finished_at": finished_at,
             "overall_passed": overall_passed,
+        })
+
+
+_FAIL_REPORT_RE = re.compile(r"^report_FEMB_\d+_t(\d+)_F_S\d+\.md$")
+_DIAG_SECTION_RE = re.compile(r"^### (t\d+)\s*\n+(.*)$", re.DOTALL)
+
+
+async def regenerate_diagnostic_stream(
+    femb_run_id: int,
+    only_test_id: str | None = None,
+) -> AsyncIterator[str]:
+    """Re-run the diagnostic agent for failed tests of one FEMB run.
+
+    If `only_test_id` is given, regen just that one section and merge into the
+    existing diagnostic_md; otherwise regen all failures (overwrite).
+    Streams the same diagnostic_* events as the live flow plus a final
+    regenerate_complete event, updates femb_runs.diagnostic_md on success.
+    """
+    conn = monitor_db.store._open()
+    try:
+        row = conn.execute(
+            "SELECT fr.id, fr.session_id, fr.femb_id, fr.femb_serial, fr.diagnostic_md, fs.run_dir "
+            "FROM femb_runs fr JOIN femb_sessions fs ON fs.id = fr.session_id "
+            "WHERE fr.id = ?",
+            (femb_run_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        yield event({"type": "error", "message": "femb run not found"})
+        yield DONE
+        return
+
+    femb_id = row["femb_id"]
+    femb_serial = row["femb_serial"]
+    rel_run_dir = row["run_dir"]
+    existing_md = row["diagnostic_md"] or ""
+
+    qc_root = Path(settings.qc_root).resolve()
+    run_dir_abs = (qc_root / "Report" / rel_run_dir).resolve()
+    femb_subdir = run_dir_abs / f"FEMB{femb_serial}_{femb_id}"
+
+    if not femb_subdir.is_dir():
+        yield event({"type": "error", "message": f"FEMB directory not found: {femb_subdir.name}"})
+        yield DONE
+        return
+
+    # Parse the run dir name for the test_type_hint, tolerant of unknown formats.
+    parent = Path(rel_run_dir).parent.name
+    started_at = None
+    test_type_hint = run_dir_abs.name
+    parsed = _parse_time_parent(parent)
+    if parsed is not None:
+        started_at, test_type_hint = _parse_run_dir_name(run_dir_abs.name, *parsed)
+    _ = started_at  # only test_type_hint is needed here
+
+    failed: list[tuple[int, Path]] = []
+    for p in femb_subdir.iterdir():
+        if not p.is_file():
+            continue
+        m = _FAIL_REPORT_RE.match(p.name)
+        if m:
+            failed.append((int(m.group(1)), p))
+    failed.sort(key=lambda x: x[0])
+    if only_test_id:
+        target = only_test_id.lstrip("t")
+        failed = [(n, p) for n, p in failed if str(n) == target]
+    failed_files = [p for _, p in failed]
+
+    yield event({
+        "type": "regenerate_start",
+        "femb_run_id": femb_run_id,
+        "femb_id": femb_id,
+        "n_failures": len(failed_files),
+        "test_id": only_test_id,
+    })
+
+    new_sections: dict[str, str] = {}
+    for f in failed_files:
+        m = _FAIL_REPORT_RE.match(f.name)
+        if m is None:
+            continue
+        test_id = f"t{int(m.group(1))}"
+        try:
+            md_text = await asyncio.to_thread(f.read_text, encoding="utf-8")
+        except Exception as exc:
+            yield event({
+                "type": "diagnostic_error",
+                "femb_id": femb_id,
+                "test_id": test_id,
+                "message": f"failed to read report: {exc}",
+            })
+            continue
+
+        yield event({"type": "diagnostic_start", "femb_id": femb_id, "test_id": test_id})
+        tokens: list[str] = []
+        try:
+            from diagnostic_agent import run_diagnostic_for_failed_report  # local import to avoid cycle at module load
+            async for evt in run_diagnostic_for_failed_report(
+                md_text=md_text,
+                test_id=test_id,
+                femb_id=femb_id,
+                femb_serial=femb_serial,
+                test_type_hint=test_type_hint,
+            ):
+                yield event(evt)
+                if evt.get("type") == "diagnostic_token":
+                    tokens.append(evt.get("text", ""))
+        except Exception as exc:
+            yield event({
+                "type": "diagnostic_error",
+                "femb_id": femb_id,
+                "test_id": test_id,
+                "message": str(exc),
+            })
+        yield event({"type": "diagnostic_done", "femb_id": femb_id, "test_id": test_id})
+
+        if tokens:
+            new_sections[test_id] = "".join(tokens).strip()
+
+    if only_test_id:
+        # Merge: keep existing sections except the targeted one(s) we just regen'd.
+        merged = dict(_parse_diagnostic_md(existing_md))
+        merged.update(new_sections)
+    else:
+        # Overwrite: only the freshly-generated sections survive.
+        merged = new_sections
+
+    ordered = sorted(
+        merged.items(),
+        key=lambda kv: int(kv[0].lstrip("t")) if kv[0].lstrip("t").isdigit() else 0,
+    )
+    new_diagnostic_md = "\n\n---\n\n".join(f"### {tid}\n\n{text}" for tid, text in ordered)
+    monitor_db.store.update_diagnostic(femb_run_id, new_diagnostic_md or None)
+
+    yield event({
+        "type": "regenerate_complete",
+        "femb_run_id": femb_run_id,
+        "femb_id": femb_id,
+        "test_id": only_test_id,
+        "diagnostic_md": new_diagnostic_md,
+    })
+    yield DONE
+
+
+
+
+
+def _parse_diagnostic_md(md: str) -> list[tuple[str, str]]:
+    """Split a saved diagnostic_md back into ordered [(test_id, text), ...]."""
+    if not md or not md.strip():
+        return []
+    out: list[tuple[str, str]] = []
+    for chunk in re.split(r"\n\s*---\s*\n", md):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        m = _DIAG_SECTION_RE.match(chunk)
+        if m:
+            out.append((m.group(1), m.group(2).strip()))
+    return out
+
+
+async def _replay_persisted(
+    meta: SessionMeta,
+    runs: list[dict],
+) -> AsyncIterator[str]:
+    """Yield SSE events for a fully-persisted finished session. No LLM, no watching."""
+    for payload in _existing_events(meta):
+        yield event(payload)
+
+    runs_by_femb = {r["femb_id"]: r for r in runs}
+
+    for femb in meta.fembs:
+        r = runs_by_femb.get(femb.femb_id)
+        if not r:
+            continue
+        for test_id, text in _parse_diagnostic_md(r.get("diagnostic_md") or ""):
+            yield event({
+                "type": "diagnostic_start",
+                "femb_id": femb.femb_id,
+                "test_id": test_id,
+                "cached": True,
+            })
+            yield event({
+                "type": "diagnostic_token",
+                "femb_id": femb.femb_id,
+                "test_id": test_id,
+                "text": text,
+            })
+            yield event({
+                "type": "diagnostic_done",
+                "femb_id": femb.femb_id,
+                "test_id": test_id,
+            })
+
+    for femb in meta.fembs:
+        r = runs_by_femb.get(femb.femb_id)
+        if not r:
+            continue
+        yield event({
+            "type": "femb_summary",
+            "femb_id": femb.femb_id,
+            "femb_serial": r.get("femb_serial") or femb.serial,
+            "n_tests": r.get("n_tests", 0),
+            "n_failed": r.get("n_failed", 0),
+            "passed": bool(r.get("passed")),
+            "summary_md": r.get("summary_md") or "",
+            "from_cache": True,
+            "femb_run_id": r.get("id"),
+        })
+
+    db_session = monitor_db.store.get_session_by_rel_path(meta.rel_path)
+    if db_session and db_session.get("finished_at"):
+        yield event({
+            "type": "session_complete",
+            "finished_at": db_session["finished_at"],
+            "overall_passed": bool(db_session.get("overall_passed")),
         })
 
 
@@ -500,9 +721,18 @@ async def watch_session(session_id: str) -> AsyncIterator[str]:
         return
 
     # Pre-create session row (no-op if exists).
-    monitor_db.store.upsert_session(meta.rel_path, meta.started_at)
+    session_db_id = monitor_db.store.upsert_session(meta.rel_path, meta.started_at)
 
     yield event({"type": "session_info", **meta.to_json()})
+
+    # Fast-path: fully-finished and fully-persisted → static replay, no LLM, no watching.
+    if _all_fembs_finalized(meta) and meta.fembs:
+        runs = monitor_db.store.list_femb_runs(session_db_id)
+        if len(runs) == len(meta.fembs):
+            async for sse_chunk in _replay_persisted(meta, runs):
+                yield sse_chunk
+            yield DONE
+            return
 
     out: asyncio.Queue[dict] = asyncio.Queue()
     file_task = asyncio.create_task(_file_producer(meta, out))

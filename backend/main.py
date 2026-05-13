@@ -13,7 +13,8 @@ from pydantic import BaseModel
 from catalog_agent import call_mcp_tool, get_report, list_reports
 from config import settings
 from document_store import DocumentStore
-from monitor_session import list_sessions, watch_session
+import monitor_db
+from monitor_session import list_sessions, regenerate_diagnostic_stream, watch_session
 from pipeline import run_pipeline
 from rag_pipeline import ingest, query
 
@@ -308,3 +309,32 @@ async def monitor_session_stream(session_id: str):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/monitor/femb-runs/{run_id}/diagnostic/regenerate")
+async def regenerate_femb_diagnostic(run_id: int, test_id: str | None = Query(None)):
+    return StreamingResponse(
+        regenerate_diagnostic_stream(run_id, test_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.delete("/monitor/femb-runs/{run_id}/diagnostic")
+async def delete_femb_diagnostic(run_id: int, test_id: str | None = Query(None)):
+    if test_id is None:
+        monitor_db.store.update_diagnostic(run_id, None)
+        return {"ok": True, "femb_run_id": run_id, "test_id": None}
+
+    row = monitor_db.store.get_femb_run_by_id(run_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="femb run not found")
+    from monitor_session import _parse_diagnostic_md  # avoid circular at module load
+    remaining = [
+        (tid, text)
+        for tid, text in _parse_diagnostic_md(row.get("diagnostic_md") or "")
+        if tid != test_id
+    ]
+    new_md = "\n\n---\n\n".join(f"### {tid}\n\n{text}" for tid, text in remaining) or None
+    monitor_db.store.update_diagnostic(run_id, new_md)
+    return {"ok": True, "femb_run_id": run_id, "test_id": test_id}
