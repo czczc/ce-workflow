@@ -8,7 +8,6 @@ Pure async; no LangGraph. The diagnostic subgraph is wired in slice #60.
 
 import asyncio
 import base64
-import os
 import re
 import threading
 from dataclasses import dataclass
@@ -20,6 +19,7 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from config import settings
+from diagnostic_agent import run_diagnostic_for_failed_report
 from sse import DONE, event
 
 # ─── Filename / dir-name patterns ──────────────────────────────────────────
@@ -249,11 +249,10 @@ def _classify_file(abs_path: Path, meta: SessionMeta) -> dict | None:
 
     m = REPORT_RE.match(fname)
     if m:
-        t_num, pf, slot = m.groups()
         return {
-            "type": "test_pass" if pf == "P" else "test_fail",
+            "type": "test_pass" if m.group(2) == "P" else "test_fail",
             "femb_id": femb.femb_id,
-            "test_id": f"t{int(t_num)}",
+            "test_id": f"t{int(m.group(1))}",
             "file": str(rel),
         }
     if FINAL_RE.match(fname):
@@ -296,31 +295,59 @@ def _all_fembs_finalized(meta: SessionMeta) -> bool:
     return all(_has_final_report(meta.abs_path / f.subdir) for f in meta.fembs)
 
 
-async def watch_session(session_id: str) -> AsyncIterator[str]:
-    """SSE generator: emits session_info, per-file events, ends on final reports."""
-    meta = get_session(session_id)
-    if meta is None:
-        yield event({"type": "error", "message": "session not found"})
-        yield DONE
+async def _spawn_diagnostic(
+    out: asyncio.Queue,
+    meta: SessionMeta,
+    payload: dict,
+) -> None:
+    """Background task: run the diagnostic for one failed report, push events to `out`."""
+    femb_id = payload["femb_id"]
+    test_id = payload["test_id"]
+    femb = next((f for f in meta.fembs if f.femb_id == femb_id), None)
+    md_path = meta.abs_path / payload["file"]
+    try:
+        md_text = await asyncio.to_thread(md_path.read_text, encoding="utf-8")
+    except Exception as exc:
+        await out.put({
+            "type": "diagnostic_error",
+            "femb_id": femb_id,
+            "test_id": test_id,
+            "message": f"failed to read report: {exc}",
+        })
         return
 
-    yield event({"type": "session_info", **meta.to_json()})
+    await out.put({"type": "diagnostic_start", "femb_id": femb_id, "test_id": test_id})
+    try:
+        async for evt in run_diagnostic_for_failed_report(
+            md_text=md_text,
+            test_id=test_id,
+            femb_id=femb_id,
+            femb_serial=femb.serial if femb else "",
+            test_type_hint=meta.test_type_hint,
+        ):
+            await out.put(evt)
+    except Exception as exc:
+        await out.put({
+            "type": "diagnostic_error",
+            "femb_id": femb_id,
+            "test_id": test_id,
+            "message": str(exc),
+        })
+    finally:
+        await out.put({"type": "diagnostic_done", "femb_id": femb_id, "test_id": test_id})
 
+
+async def _file_producer(meta: SessionMeta, out: asyncio.Queue) -> None:
+    """Push test_pass / test_fail / final_report payloads onto `out`."""
     seen_paths: set[str] = set()
-    finalized: set[str] = set()
 
-    # 1) Replay existing files first
     for payload in _existing_events(meta):
         seen_paths.add(payload["file"])
-        if payload["type"] == "final_report":
-            finalized.add(payload["femb_id"])
-        yield event(payload)
+        await out.put(payload)
 
     if _all_fembs_finalized(meta):
-        yield DONE
         return
 
-    # 2) Live watch for new files
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
     handler = _AsyncEventBridge(loop, queue)
@@ -331,34 +358,67 @@ async def watch_session(session_id: str) -> AsyncIterator[str]:
     try:
         while True:
             try:
-                abs_str, _kind = await asyncio.wait_for(queue.get(), timeout=1.0)
+                abs_str, _ = await asyncio.wait_for(queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
                 if _all_fembs_finalized(meta):
-                    break
+                    return
                 continue
 
-            abs_path = Path(abs_str)
-            payload = _classify_file(abs_path, meta)
-            if payload is None:
-                continue
-            if payload["file"] in seen_paths:
+            payload = _classify_file(Path(abs_str), meta)
+            if payload is None or payload["file"] in seen_paths:
                 continue
             seen_paths.add(payload["file"])
+            await out.put(payload)
 
-            yield event(payload)
-
-            if payload["type"] == "final_report":
-                finalized.add(payload["femb_id"])
-                if _all_fembs_finalized(meta):
-                    break
-    except asyncio.CancelledError:
-        # Client disconnected; clean up and propagate
-        raise
+            if payload["type"] == "final_report" and _all_fembs_finalized(meta):
+                return
     finally:
         observer.stop()
         try:
             await asyncio.to_thread(observer.join, 2.0)
         except Exception:
             pass
+
+
+async def watch_session(session_id: str) -> AsyncIterator[str]:
+    """SSE generator: emits session_info, per-file events, and per-failure
+    diagnostic events (streamed concurrently). Ends on final reports + all
+    spawned diagnostics complete.
+    """
+    meta = get_session(session_id)
+    if meta is None:
+        yield event({"type": "error", "message": "session not found"})
+        yield DONE
+        return
+
+    yield event({"type": "session_info", **meta.to_json()})
+
+    out: asyncio.Queue[dict] = asyncio.Queue()
+    file_task = asyncio.create_task(_file_producer(meta, out))
+    diag_tasks: set[asyncio.Task] = set()
+
+    try:
+        while True:
+            # exit when file producer done, no live diag tasks, queue empty
+            diag_tasks = {t for t in diag_tasks if not t.done()}
+            if file_task.done() and not diag_tasks and out.empty():
+                break
+            try:
+                payload = await asyncio.wait_for(out.get(), timeout=0.2)
+            except asyncio.TimeoutError:
+                continue
+
+            yield event(payload)
+
+            if payload.get("type") == "test_fail":
+                t = asyncio.create_task(_spawn_diagnostic(out, meta, payload))
+                diag_tasks.add(t)
+    except asyncio.CancelledError:
+        raise
+    finally:
+        for t in [file_task, *diag_tasks]:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(file_task, *diag_tasks, return_exceptions=True)
 
     yield DONE

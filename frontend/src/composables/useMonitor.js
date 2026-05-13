@@ -30,9 +30,23 @@ export function useMonitor() {
 
   function _ensureFemb(femb_id) {
     if (!eventsByFemb.value[femb_id]) {
-      eventsByFemb.value[femb_id] = { tests: {}, final: false }
+      eventsByFemb.value[femb_id] = { tests: {}, final: false, diagnostics: {} }
     }
     return eventsByFemb.value[femb_id]
+  }
+
+  function _ensureDiag(femb_id, test_id) {
+    const f = _ensureFemb(femb_id)
+    if (!f.diagnostics[test_id]) {
+      f.diagnostics[test_id] = {
+        status: 'pending',
+        sources: [],
+        chunks: [],
+        text: '',
+        error: '',
+      }
+    }
+    return f.diagnostics[test_id]
   }
 
   async function startWatching(sessionId) {
@@ -63,6 +77,27 @@ export function useMonitor() {
         },
         final_report: (evt) => {
           _ensureFemb(evt.femb_id).final = true
+        },
+        diagnostic_start: (evt) => {
+          _ensureDiag(evt.femb_id, evt.test_id).status = 'streaming'
+        },
+        diagnostic_sources: (evt) => {
+          _ensureDiag(evt.femb_id, evt.test_id).sources = evt.sources || []
+        },
+        diagnostic_retrieval: (evt) => {
+          _ensureDiag(evt.femb_id, evt.test_id).chunks = evt.chunks || []
+        },
+        diagnostic_token: (evt) => {
+          _ensureDiag(evt.femb_id, evt.test_id).text += evt.text
+        },
+        diagnostic_done: (evt) => {
+          const d = _ensureDiag(evt.femb_id, evt.test_id)
+          if (d.status !== 'error') d.status = 'done'
+        },
+        diagnostic_error: (evt) => {
+          const d = _ensureDiag(evt.femb_id, evt.test_id)
+          d.status = 'error'
+          d.error = evt.message || 'diagnostic failed'
         },
         error: (evt) => {
           error.value = evt.message || 'stream error'
