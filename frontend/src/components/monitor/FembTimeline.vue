@@ -67,7 +67,9 @@
       >
         <div class="diag-head">
           <span class="diag-id mdi mdi-close-circle"></span>
-          <span class="diag-title">{{ testId }} — diagnostic</span>
+          <span class="diag-title">
+            {{ testId }}<span v-if="labelFor(testId)" class="diag-title-name"> · {{ labelFor(testId) }}</span>
+          </span>
           <span class="diag-status" :class="state.diagnostics[testId]?.status">
             <span v-if="state.diagnostics[testId]?.status === 'streaming'" class="dot pulse"></span>
             {{ state.diagnostics[testId]?.status || 'pending' }}
@@ -139,10 +141,15 @@ import { marked } from 'marked'
 const props = defineProps({
   femb: { type: Object, required: true },         // { femb_id, serial, subdir }
   state: { type: Object, required: true },        // { tests, final, diagnostics, summary }
+  testLabels: { type: Object, default: () => ({}) }, // { "t1": "pwr_consumption", ... }
   totalSlots: { type: Number, default: 17 },
   onRegenerate: { type: Function, default: null }, // async (fembRunId, fembId) => void
   onClear:      { type: Function, default: null }, // (fembRunId, fembId) => void
 })
+
+function labelFor(testId) {
+  return props.testLabels?.[testId] || ''
+}
 
 const regeneratingAll = ref(false)
 const regeneratingCards = ref(new Set())  // test_ids currently regenerating individually
@@ -217,10 +224,13 @@ function cellClass(t) {
   return 'pending'
 }
 function cellTitle(t) {
-  const v = props.state.tests?.[`t${t}`]
-  if (!v) return `t${t} — pending`
-  if (v === 'fail') return `t${t} — fail (click to jump to diagnostic)`
-  return `t${t} — ${v}`
+  const tid = `t${t}`
+  const name = labelFor(tid)
+  const head = name ? `${tid} · ${name}` : tid
+  const v = props.state.tests?.[tid]
+  if (!v) return `${head} — pending`
+  if (v === 'fail') return `${head} — fail (click to jump to diagnostic)`
+  return `${head} — ${v}`
 }
 
 const diagRefs = new Map()
@@ -379,6 +389,7 @@ function renderMarkdown(text) {
   font-weight: 600;
   color: var(--ink-0);
 }
+.diag-title-name { color: var(--ink-2); font-weight: 500; }
 .diag-status {
   font-size: 10px;
   padding: 2px 7px;

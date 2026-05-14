@@ -5,6 +5,7 @@ export function useMonitor() {
   const sessions = ref([])
   const selectedSessionId = ref('')
   const sessionMeta = ref(null)
+  const testLabels = ref({})    // { "t1": "pwr_consumption", ... }
   const eventsByFemb = ref({})  // femb_id -> { tests, final, diagnostics, summary }
   const sessionComplete = ref(null) // { finished_at, overall_passed } | null
   const streaming = ref(false)
@@ -25,6 +26,7 @@ export function useMonitor() {
 
   function _resetSessionState() {
     sessionMeta.value = null
+    testLabels.value = {}
     eventsByFemb.value = {}
     sessionComplete.value = null
     error.value = ''
@@ -74,6 +76,7 @@ export function useMonitor() {
       await readStream(resp, {
         session_info: (evt) => {
           sessionMeta.value = evt
+          testLabels.value = evt.test_labels || {}
           // Pre-populate FEMB entries so empty columns render
           for (const f of evt.fembs || []) _ensureFemb(f.femb_id)
         },
@@ -246,6 +249,7 @@ export function useMonitor() {
     sessions,
     selectedSessionId,
     sessionMeta,
+    testLabels,
     fembs,
     eventsByFemb,
     sessionComplete,

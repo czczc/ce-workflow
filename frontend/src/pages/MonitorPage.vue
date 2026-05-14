@@ -68,6 +68,7 @@
             :key="f.femb_id"
             :femb="f"
             :state="eventsByFemb[f.femb_id] || { tests: {}, final: false, diagnostics: {} }"
+            :test-labels="testLabels"
             :on-regenerate="regenerateDiagnostic"
             :on-clear="clearDiagnostic"
           />
@@ -155,6 +156,7 @@ const {
   sessions,
   selectedSessionId,
   sessionMeta,
+  testLabels,
   fembs,
   eventsByFemb,
   sessionComplete,

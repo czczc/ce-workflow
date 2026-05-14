@@ -22,7 +22,11 @@ from watchdog.observers import Observer
 import monitor_db
 from config import settings
 from diagnostic_agent import run_diagnostic_for_failed_report, stream_femb_summary
+from femb_test_schema import TEST_ITEMS
 from sse import DONE, event
+
+# Test number → short human-readable name (e.g. 1 → "pwr_consumption").
+TEST_LABELS: dict[str, str] = {f"t{n}": spec["name"] for n, spec in TEST_ITEMS.items()}
 
 # ─── Filename / dir-name patterns ──────────────────────────────────────────
 
@@ -1006,7 +1010,7 @@ async def watch_session(session_id: str) -> AsyncIterator[str]:
     # Pre-create session row (no-op if exists).
     session_db_id = monitor_db.store.upsert_session(meta.rel_path, meta.started_at)
 
-    yield event({"type": "session_info", **meta.to_json()})
+    yield event({"type": "session_info", **meta.to_json(), "test_labels": TEST_LABELS})
 
     # Fast-path: every FEMB has a Final_Report on disk AND a DB row (diagnostics
     # are saved). Replay file events + cached diagnostics; if any row has a
