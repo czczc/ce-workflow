@@ -299,8 +299,8 @@ async def list_documents():
 
 
 @app.get("/monitor/sessions")
-async def monitor_sessions():
-    return list_sessions()
+async def monitor_sessions(month: str | None = None):
+    return list_sessions(month=month)
 
 
 @app.get("/monitor/sessions/{session_id}/stream")

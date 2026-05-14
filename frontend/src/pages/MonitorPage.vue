@@ -3,19 +3,13 @@
     <div class="monitor-topbar">
       <div class="topbar-left">
         <label class="topbar-label">Session</label>
-        <select
-          class="session-select"
-          :value="selectedSessionId"
-          @change="onPickSession($event.target.value)"
-        >
-          <option value="" disabled>— choose a run dir —</option>
-          <option v-for="s in sessions" :key="s.session_id" :value="s.session_id">
-            {{ formatSessionLabel(s) }}
-          </option>
-        </select>
-        <button class="link-btn" @click="refreshSessions" title="Refresh session list">
-          <span class="mdi mdi-refresh"></span>
-        </button>
+        <SessionPicker
+          :model-value="selectedSessionId"
+          :sessions-tree="sessionsTree"
+          :sessions-loading="sessionsLoading"
+          :on-load-sessions="loadSessions"
+          @select="onPickSession"
+        />
       </div>
 
       <div class="topbar-meta" v-if="sessionMeta">
@@ -108,6 +102,7 @@ import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 import { useMonitor } from '../composables/useMonitor'
 import FembTimeline from '../components/monitor/FembTimeline.vue'
 import MonitorChat from '../components/monitor/MonitorChat.vue'
+import SessionPicker from '../components/monitor/SessionPicker.vue'
 
 const DEFAULT_CHAT_WIDTH = 400
 const MIN_CHAT_WIDTH = 280
@@ -153,7 +148,8 @@ function resetWidth() {
 }
 
 const {
-  sessions,
+  sessionsTree,
+  sessionsLoading,
   selectedSessionId,
   sessionMeta,
   testLabels,
@@ -172,26 +168,9 @@ const {
 onMounted(() => loadSessions())
 onBeforeUnmount(() => stopWatching())
 
-function refreshSessions() {
-  loadSessions()
-}
-
 function onPickSession(sid) {
   if (!sid) return
   startWatching(sid)
-}
-
-function formatSessionLabel(s) {
-  let status
-  if (s.persisted) {
-    status = s.overall_passed ? '✓ pass' : '✗ fail'
-  } else if (s.in_progress) {
-    status = '● running'
-  } else {
-    status = '○ unsaved'
-  }
-  const ts = s.started_at ? s.started_at.replace('T', ' ') : '—'
-  return `${ts}  ·  ${s.test_type_hint}  ·  ${status}`
 }
 </script>
 
@@ -227,30 +206,6 @@ function formatSessionLabel(s) {
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
-
-.session-select {
-  flex: 1;
-  min-width: 0;
-  max-width: 640px;
-  padding: 6px 10px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  background: var(--bg-2);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
-  color: var(--ink-0);
-}
-.session-select:focus { outline: 1px solid var(--accent); }
-
-.link-btn {
-  background: transparent;
-  border: 1px solid var(--line-2);
-  color: var(--ink-2);
-  padding: 4px 6px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-}
-.link-btn:hover { color: var(--ink-0); background: var(--bg-2); }
 
 .topbar-meta {
   display: flex;

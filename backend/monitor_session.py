@@ -161,41 +161,72 @@ def _build_session_meta(rel_path: str, abs_path: Path) -> SessionMeta | None:
 
 # ─── Sessions listing ──────────────────────────────────────────────────────
 
-def list_sessions() -> list[dict]:
-    """Scan $QC_ROOT/Report/Time_*/ and return parsed session metadata, newest first.
-    Merges DB state (overall_passed, finished_at, persisted=True) where present.
+def _run_to_dict(meta: SessionMeta) -> dict:
+    """SessionMeta → API row with DB-derived status fields."""
+    d = meta.to_json()
+    db_row = monitor_db.store.get_session_by_rel_path(meta.rel_path)
+    if db_row:
+        d["persisted"] = True
+        d["overall_passed"] = bool(db_row.get("overall_passed"))
+        d["finished_at"] = db_row.get("finished_at")
+    else:
+        d["persisted"] = False
+    # Compact status for the picker icon: in_progress | passed | failed | unopened
+    if meta.in_progress:
+        d["status"] = "in_progress"
+    elif d["persisted"]:
+        d["status"] = "passed" if d["overall_passed"] else "failed"
+    else:
+        d["status"] = "unopened"
+    return d
+
+
+def _scan_runs_in_month(time_dir: Path) -> list[dict]:
+    """Return run dicts (newest first) for one Time_YYYY_MM directory."""
+    metas: list[SessionMeta] = []
+    for run_dir in time_dir.iterdir():
+        if not run_dir.is_dir():
+            continue
+        rel = f"{time_dir.name}/{run_dir.name}"
+        meta = _build_session_meta(rel, run_dir.resolve())
+        if meta is not None:
+            metas.append(meta)
+    metas.sort(key=lambda m: m.started_at or "", reverse=True)
+    return [_run_to_dict(m) for m in metas]
+
+
+def list_sessions(month: str | None = None) -> dict:
+    """Return the /monitor sessions tree (or one month's runs if `month` given).
+
+    Tree shape: {"months": [{"name": "Time_YYYY_MM", "runs": [...]}, ...]} newest-first.
+    Month shape: {"name": "Time_YYYY_MM", "runs": [...]}.
+
+    Each run carries the existing SessionMeta fields plus DB-derived `persisted`,
+    `overall_passed`, `finished_at`, and a compact `status` field for the picker
+    icon: "in_progress" | "passed" | "failed" | "unopened".
     """
     qc_root = Path(settings.qc_root).resolve()
     report_root = qc_root / "Report"
     if not report_root.is_dir():
-        return []
+        return {"months": []} if month is None else {"name": month, "runs": []}
 
-    out: list[SessionMeta] = []
-    for time_dir in report_root.iterdir():
+    if month is not None:
+        # Validate to avoid traversal: must match TIME_DIR_RE.
+        if not TIME_DIR_RE.match(month):
+            return {"name": month, "runs": []}
+        time_dir = report_root / month
+        if not time_dir.is_dir():
+            return {"name": month, "runs": []}
+        return {"name": month, "runs": _scan_runs_in_month(time_dir)}
+
+    months: list[dict] = []
+    for time_dir in sorted(report_root.iterdir(), key=lambda p: p.name, reverse=True):
         if not time_dir.is_dir() or not TIME_DIR_RE.match(time_dir.name):
             continue
-        for run_dir in time_dir.iterdir():
-            if not run_dir.is_dir():
-                continue
-            rel = f"{time_dir.name}/{run_dir.name}"
-            meta = _build_session_meta(rel, run_dir.resolve())
-            if meta is not None:
-                out.append(meta)
-
-    # newest first by started_at (None last)
-    out.sort(key=lambda m: m.started_at or "", reverse=True)
-    result = []
-    for m in out:
-        d = m.to_json()
-        db_row = monitor_db.store.get_session_by_rel_path(m.rel_path)
-        if db_row:
-            d["persisted"] = True
-            d["overall_passed"] = bool(db_row.get("overall_passed"))
-            d["finished_at"] = db_row.get("finished_at")
-        else:
-            d["persisted"] = False
-        result.append(d)
-    return result
+        runs = _scan_runs_in_month(time_dir)
+        if runs:
+            months.append({"name": time_dir.name, "runs": runs})
+    return {"months": months}
 
 
 def get_session(session_id: str) -> SessionMeta | None:

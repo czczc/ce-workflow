@@ -29,6 +29,12 @@ class Settings(BaseSettings):
 
     qc_root: str = "/Users/chaozhang/tmp/FEMB_QC"
 
+    # Remote QC server (ssh-accessible). When remote_host is empty the
+    # /monitor flow uses qc_root directly (dev / mock_daq mode). When set,
+    # the session listing is fetched via ssh and runs are rsync'd into qc_root.
+    remote_host: str = ""
+    remote_qc_root: str = "/mnt/data/FEMB_QC"
+
     hardware_check_url: str = "http://127.0.0.1:8000/hardware/anomaly-check"
     django_mcp_url: str = "http://localhost:8001/mcp"
     daq_mcp_url: str = "http://localhost:8002/mcp"

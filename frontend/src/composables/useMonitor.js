@@ -2,7 +2,9 @@ import { ref, computed } from 'vue'
 import { readStream } from './useStream'
 
 export function useMonitor() {
-  const sessions = ref([])
+  // Tree of months: { months: [{ name, runs: [...] }, ...] }, newest-first.
+  const sessionsTree = ref({ months: [] })
+  const sessionsLoading = ref(false)
   const selectedSessionId = ref('')
   const sessionMeta = ref(null)
   const testLabels = ref({})    // { "t1": "pwr_consumption", ... }
@@ -14,13 +16,32 @@ export function useMonitor() {
 
   const fembs = computed(() => sessionMeta.value?.fembs ?? [])
 
-  async function loadSessions() {
+  async function loadSessions(month = null) {
+    sessionsLoading.value = true
     try {
-      const resp = await fetch('/monitor/sessions')
+      const url = month
+        ? `/monitor/sessions?month=${encodeURIComponent(month)}`
+        : '/monitor/sessions'
+      const resp = await fetch(url)
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      sessions.value = await resp.json()
+      const data = await resp.json()
+      if (month) {
+        // Merge: replace this month's runs in place, or insert newest-first.
+        const months = sessionsTree.value.months.slice()
+        const idx = months.findIndex((m) => m.name === data.name)
+        if (idx >= 0) months[idx] = data
+        else {
+          months.push(data)
+          months.sort((a, b) => (a.name < b.name ? 1 : -1))
+        }
+        sessionsTree.value = { months }
+      } else {
+        sessionsTree.value = data
+      }
     } catch (e) {
       error.value = `Failed to load sessions: ${e.message}`
+    } finally {
+      sessionsLoading.value = false
     }
   }
 
@@ -246,7 +267,8 @@ export function useMonitor() {
   }
 
   return {
-    sessions,
+    sessionsTree,
+    sessionsLoading,
     selectedSessionId,
     sessionMeta,
     testLabels,
