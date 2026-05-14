@@ -13,12 +13,12 @@
         <button
           v-if="remoteStatus.configured"
           class="remote-chip"
-          :class="{ ok: remoteStatus.ok, bad: !remoteStatus.ok }"
+          :class="remoteChipClass"
           @click="retryRemote"
           :disabled="sessionsLoading"
           :title="remoteTitle"
         >
-          <span class="mdi" :class="remoteStatus.ok ? 'mdi-cloud-check-outline' : 'mdi-cloud-off-outline'"></span>
+          <span class="mdi" :class="remoteChipIcon"></span>
           <span class="remote-host">{{ remoteStatus.host || 'remote' }}</span>
         </button>
       </div>
@@ -46,6 +46,10 @@
         <span v-if="syncing" class="meta-chip syncing">
           <span class="mdi mdi-cloud-download-outline"></span>
           syncing…
+        </span>
+        <span v-if="syncStalled" class="meta-chip stalled" title="3+ consecutive rsync cycles failed">
+          <span class="mdi mdi-sync-alert"></span>
+          sync stalled
         </span>
         <span class="meta-chip" :class="streaming ? 'live' : ''">
           <span class="dot" :class="streaming ? 'live' : 'idle'"></span>
@@ -167,6 +171,7 @@ const {
   sessionsLoading,
   remoteStatus,
   syncing,
+  syncStalled,
   selectedSessionId,
   sessionMeta,
   testLabels,
@@ -195,11 +200,29 @@ function retryRemote() {
 }
 
 const remoteTitle = computed(() => {
-  if (!remoteStatus.value.configured) return ''
-  if (remoteStatus.value.ok) return `remote ${remoteStatus.value.host} · click to refresh`
-  return `remote ${remoteStatus.value.host || ''} unreachable${
-    remoteStatus.value.error ? ` (${remoteStatus.value.error})` : ''
-  } · click to retry`
+  const s = remoteStatus.value
+  if (!s.configured) return ''
+  if (s.stalled) {
+    return `remote ${s.host || ''} sync stalled${s.error ? ` (${s.error})` : ''} · click to retry`
+  }
+  if (s.ok === false) {
+    return `remote ${s.host || ''} unreachable${s.error ? ` (${s.error})` : ''} · click to retry`
+  }
+  return `remote ${s.host} · click to refresh`
+})
+
+const remoteChipClass = computed(() => {
+  const s = remoteStatus.value
+  if (s.stalled) return 'bad'
+  if (s.ok === false) return 'warn'
+  return 'ok'
+})
+
+const remoteChipIcon = computed(() => {
+  const s = remoteStatus.value
+  if (s.stalled) return 'mdi-cloud-off-outline'
+  if (s.ok === false) return 'mdi-cloud-alert-outline'
+  return 'mdi-cloud-check-outline'
 })
 </script>
 
@@ -252,8 +275,9 @@ const remoteTitle = computed(() => {
 }
 .remote-chip:disabled { cursor: wait; opacity: 0.6; }
 .remote-chip .mdi { font-size: 13px; }
-.remote-chip.ok  { color: var(--ok);     background: rgba(57, 211, 83, 0.10);  border-color: rgba(57, 211, 83, 0.35); }
-.remote-chip.bad { color: var(--danger); background: rgba(248, 81, 73, 0.10); border-color: rgba(248, 81, 73, 0.35); }
+.remote-chip.ok   { color: var(--ok);     background: rgba(57, 211, 83, 0.10);  border-color: rgba(57, 211, 83, 0.35); }
+.remote-chip.warn { color: var(--warning, #d29922); background: rgba(210, 153, 34, 0.12); border-color: rgba(210, 153, 34, 0.40); }
+.remote-chip.bad  { color: var(--danger); background: rgba(248, 81, 73, 0.10); border-color: rgba(248, 81, 73, 0.35); }
 .remote-host { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; }
 
 .meta-chip.syncing {
@@ -261,6 +285,12 @@ const remoteTitle = computed(() => {
   background: rgba(56, 139, 253, 0.10);
 }
 .meta-chip.syncing .mdi { font-size: 12px; }
+
+.meta-chip.stalled {
+  color: var(--danger);
+  background: rgba(248, 81, 73, 0.10);
+}
+.meta-chip.stalled .mdi { font-size: 13px; }
 
 .topbar-meta {
   display: flex;

@@ -5,10 +5,14 @@ export function useMonitor() {
   // Tree of months: { months: [{ name, runs: [...] }, ...] }, newest-first.
   const sessionsTree = ref({ months: [] })
   const sessionsLoading = ref(false)
-  // Connectivity state for the remote-host chip: { configured, ok?, host?, error? }
+  // Connectivity state for the remote-host chip: { configured, ok?, host?,
+  // error?, stalled? }. Listing calls overwrite the whole object; sync_status
+  // events merge into it. `stalled` flips the chip red and triggers the
+  // session-level "sync stalled" badge.
   const remoteStatus = ref({ configured: false })
   // Per-session one-shot rsync progress flag (true between sync_start and sync_done)
   const syncing = ref(false)
+  const syncStalled = ref(false)
   const selectedSessionId = ref('')
   const sessionMeta = ref(null)
   const testLabels = ref({})    // { "t1": "pwr_consumption", ... }
@@ -56,6 +60,7 @@ export function useMonitor() {
     eventsByFemb.value = {}
     sessionComplete.value = null
     syncing.value = false
+    syncStalled.value = false
     error.value = ''
   }
 
@@ -103,6 +108,21 @@ export function useMonitor() {
       await readStream(resp, {
         sync_start: () => { syncing.value = true },
         sync_done: () => { syncing.value = false },
+        sync_status: (evt) => {
+          remoteStatus.value = {
+            ...remoteStatus.value,
+            ok: !!evt.ok,
+            stalled: !!evt.stalled,
+            error: evt.error || '',
+          }
+          syncStalled.value = !!evt.stalled
+        },
+        sync_loop_done: () => {
+          // Loop ended (finalized / idle timeout / one-shot). Drop the
+          // stalled badge; the connectivity chip stays at its last state
+          // until the next listing call.
+          syncStalled.value = false
+        },
         session_info: (evt) => {
           syncing.value = false
           sessionMeta.value = evt
@@ -280,6 +300,7 @@ export function useMonitor() {
     sessionsLoading,
     remoteStatus,
     syncing,
+    syncStalled,
     selectedSessionId,
     sessionMeta,
     testLabels,

@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     remote_host: str = ""
     remote_qc_root: str = "/mnt/data/FEMB_QC"
 
+    # Live rsync loop knobs (only relevant when remote_host is set).
+    sync_interval_sec: int = 10           # cycle period in seconds
+    sync_idle_timeout_min: int = 30       # stop loop after this many minutes without a newer .md
+    sync_preflight_stale_hours: int = 4   # newest .md older than this → one-shot, no loop
+
     hardware_check_url: str = "http://127.0.0.1:8000/hardware/anomaly-check"
     django_mcp_url: str = "http://localhost:8001/mcp"
     daq_mcp_url: str = "http://localhost:8002/mcp"

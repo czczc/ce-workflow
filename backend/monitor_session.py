@@ -20,6 +20,7 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 import monitor_db
+import monitor_sync
 import ssh_helper
 from config import settings
 from diagnostic_agent import run_diagnostic_for_failed_report, stream_femb_summary
@@ -488,6 +489,26 @@ def _all_fembs_finalized(meta: SessionMeta) -> bool:
     return all(_has_final_report(meta.abs_path / f.subdir) for f in meta.fembs)
 
 
+def _local_is_complete_and_persisted(rel_path: str) -> bool:
+    """True iff the local mirror has Final_Report for every FEMB AND the DB
+    has a femb_run row per FEMB for this session — i.e. the run is fully
+    cached and there's nothing to fetch from remote. Lets watch_session skip
+    the ssh pre-flight + rsync no-op on reselects of finished runs.
+    """
+    qc_root = Path(settings.qc_root).resolve()
+    abs_path = (qc_root / "Report" / rel_path).resolve()
+    if not abs_path.is_dir():
+        return False
+    meta = _build_session_meta(rel_path, abs_path)
+    if meta is None or not meta.fembs or not _all_fembs_finalized(meta):
+        return False
+    sess_row = monitor_db.store.get_session_by_rel_path(rel_path)
+    if not sess_row:
+        return False
+    runs = monitor_db.store.list_femb_runs(sess_row["id"])
+    return len(runs) == len(meta.fembs)
+
+
 async def _spawn_diagnostic(
     out: asyncio.Queue,
     meta: SessionMeta,
@@ -499,7 +520,7 @@ async def _spawn_diagnostic(
     femb = next((f for f in meta.fembs if f.femb_id == femb_id), None)
     md_path = meta.abs_path / payload["file"]
     try:
-        md_text = await asyncio.to_thread(md_path.read_text, encoding="utf-8")
+        md_text = await monitor_sync.stable_read_text(md_path)
     except Exception as exc:
         await out.put({
             "type": "diagnostic_error",
@@ -528,6 +549,35 @@ async def _spawn_diagnostic(
         })
     finally:
         await out.put({"type": "diagnostic_done", "femb_id": femb_id, "test_id": test_id})
+
+
+async def _sync_status_poller(rel_path: str, out: asyncio.Queue) -> None:
+    """Watches the shared SyncTaskState for `rel_path` and pushes a
+    `sync_status` event on every transition of (cycle_failures, stalled,
+    last_cycle_ok), plus a `sync_loop_done` event when the loop exits.
+    """
+    prev = None
+    while True:
+        state = monitor_sync.get_state(rel_path)
+        if state is None:
+            return
+        snapshot = (state.cycle_failures, state.stalled, state.last_cycle_ok)
+        if snapshot != prev:
+            await out.put({
+                "type": "sync_status",
+                "cycle_failures": state.cycle_failures,
+                "stalled": state.stalled,
+                "ok": state.last_cycle_ok,
+                "error": "" if state.last_cycle_ok else state.last_error,
+            })
+            prev = snapshot
+        if state.done:
+            await out.put({
+                "type": "sync_loop_done",
+                "reason": state.done_reason,
+            })
+            return
+        await asyncio.sleep(1.0)
 
 
 async def _file_producer(meta: SessionMeta, out: asyncio.Queue) -> None:
@@ -732,7 +782,7 @@ async def _finalize_femb(
     final_md = ""
     try:
         full = meta.abs_path / final_report_rel
-        final_md = await asyncio.to_thread(full.read_text, encoding="utf-8")
+        final_md = await monitor_sync.stable_read_text(full)
     except Exception:
         pass
 
@@ -906,7 +956,7 @@ async def regenerate_diagnostic_stream(
             continue
         test_id = f"t{int(m.group(1))}"
         try:
-            md_text = await asyncio.to_thread(f.read_text, encoding="utf-8")
+            md_text = await monitor_sync.stable_read_text(f)
         except Exception as exc:
             yield event({
                 "type": "diagnostic_error",
@@ -1100,7 +1150,7 @@ async def _stream_summary_for_existing_row(
                 break
     if final_path is not None:
         try:
-            final_md = await asyncio.to_thread(final_path.read_text, encoding="utf-8")
+            final_md = await monitor_sync.stable_read_text(final_path)
         except Exception:
             pass
 
@@ -1175,28 +1225,38 @@ async def watch_session(session_id: str) -> AsyncIterator[str]:
     when all FEMBs are persisted. Ends after the producer and all spawned tasks
     finish and the queue is drained.
     """
-    # Remote mode: materialize the local mirror with a one-shot rsync of *.md
-    # files before the watcher / replay path runs. Idempotent: an already-fully-
-    # mirrored run is essentially a metadata roundtrip.
+    # Remote mode: hand off to monitor_sync, which decides one-shot vs. loop
+    # based on the remote's newest .md mtime (pre-flight 4 h staleness rule)
+    # and shares the rsync task across all subscribers of this rel_path.
+    #
+    # Optimization: skip the remote round-trip entirely when the local mirror
+    # already has Final_Report for every FEMB AND the DB has a row per FEMB.
+    # That's the state of a fully-cached finished run — there's nothing to
+    # fetch, and the existing fast-path replay below makes reselects instant.
+    sync_rel_path: str | None = None
+    sync_state: monitor_sync.SyncTaskState | None = None
     if settings.remote_host:
         try:
-            rel_path = _decode_session_id(session_id)
+            sync_rel_path = _decode_session_id(session_id)
         except Exception:
             yield event({"type": "error", "message": "invalid session id"})
             yield DONE
             return
-        remote_path = f"{settings.remote_qc_root.rstrip('/')}/Report/{rel_path}"
-        local_path = Path(settings.qc_root).resolve() / "Report" / rel_path
-        yield event({"type": "sync_start", "rel_path": rel_path})
-        try:
-            await ssh_helper.rsync_pull(
-                settings.remote_host, remote_path, local_path, md_only=True
-            )
-        except ssh_helper.RemoteError as e:
-            yield event({"type": "error", "message": f"remote sync failed: {e}"})
-            yield DONE
-            return
-        yield event({"type": "sync_done"})
+        if not _local_is_complete_and_persisted(sync_rel_path):
+            yield event({"type": "sync_start", "rel_path": sync_rel_path})
+            sync_state = await monitor_sync.ensure_one_shot_or_loop(sync_rel_path)
+            if sync_state.done_reason == "preflight_failed":
+                yield event({
+                    "type": "error",
+                    "message": f"remote sync failed: {sync_state.last_error}",
+                })
+                yield DONE
+                return
+            yield event({
+                "type": "sync_done",
+                "looping": sync_state.task is not None and not sync_state.done,
+                "reason": sync_state.done_reason,
+            })
 
     meta = get_session(session_id)
     if meta is None:
@@ -1223,6 +1283,11 @@ async def watch_session(session_id: str) -> AsyncIterator[str]:
 
     out: asyncio.Queue[dict] = asyncio.Queue()
     file_task = asyncio.create_task(_file_producer(meta, out))
+    sync_status_task: asyncio.Task | None = None
+    if sync_state is not None and sync_state.task is not None and not sync_state.done:
+        sync_status_task = asyncio.create_task(
+            _sync_status_poller(sync_rel_path, out)
+        )
     diag_tasks: set[asyncio.Task] = set()
     finalize_tasks: set[asyncio.Task] = set()
 
@@ -1281,9 +1346,12 @@ async def watch_session(session_id: str) -> AsyncIterator[str]:
     except asyncio.CancelledError:
         raise
     finally:
-        for t in [file_task, *diag_tasks, *finalize_tasks]:
+        bg = [file_task, *diag_tasks, *finalize_tasks]
+        if sync_status_task is not None:
+            bg.append(sync_status_task)
+        for t in bg:
             if not t.done():
                 t.cancel()
-        await asyncio.gather(file_task, *diag_tasks, *finalize_tasks, return_exceptions=True)
+        await asyncio.gather(*bg, return_exceptions=True)
 
     yield DONE
