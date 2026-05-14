@@ -5,6 +5,10 @@ export function useMonitor() {
   // Tree of months: { months: [{ name, runs: [...] }, ...] }, newest-first.
   const sessionsTree = ref({ months: [] })
   const sessionsLoading = ref(false)
+  // Connectivity state for the remote-host chip: { configured, ok?, host?, error? }
+  const remoteStatus = ref({ configured: false })
+  // Per-session one-shot rsync progress flag (true between sync_start and sync_done)
+  const syncing = ref(false)
   const selectedSessionId = ref('')
   const sessionMeta = ref(null)
   const testLabels = ref({})    // { "t1": "pwr_consumption", ... }
@@ -25,18 +29,19 @@ export function useMonitor() {
       const resp = await fetch(url)
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
+      if (data.remote) remoteStatus.value = data.remote
       if (month) {
         // Merge: replace this month's runs in place, or insert newest-first.
         const months = sessionsTree.value.months.slice()
         const idx = months.findIndex((m) => m.name === data.name)
-        if (idx >= 0) months[idx] = data
+        if (idx >= 0) months[idx] = { name: data.name, runs: data.runs }
         else {
-          months.push(data)
+          months.push({ name: data.name, runs: data.runs })
           months.sort((a, b) => (a.name < b.name ? 1 : -1))
         }
         sessionsTree.value = { months }
       } else {
-        sessionsTree.value = data
+        sessionsTree.value = { months: data.months || [] }
       }
     } catch (e) {
       error.value = `Failed to load sessions: ${e.message}`
@@ -50,6 +55,7 @@ export function useMonitor() {
     testLabels.value = {}
     eventsByFemb.value = {}
     sessionComplete.value = null
+    syncing.value = false
     error.value = ''
   }
 
@@ -95,7 +101,10 @@ export function useMonitor() {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
 
       await readStream(resp, {
+        sync_start: () => { syncing.value = true },
+        sync_done: () => { syncing.value = false },
         session_info: (evt) => {
+          syncing.value = false
           sessionMeta.value = evt
           testLabels.value = evt.test_labels || {}
           // Pre-populate FEMB entries so empty columns render
@@ -269,6 +278,8 @@ export function useMonitor() {
   return {
     sessionsTree,
     sessionsLoading,
+    remoteStatus,
+    syncing,
     selectedSessionId,
     sessionMeta,
     testLabels,

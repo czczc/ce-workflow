@@ -71,6 +71,11 @@
           >
             <span class="run-ts">{{ formatTs(r.started_at) }}</span>
             <span class="run-hint">{{ r.test_type_hint }}</span>
+            <span
+              v-if="r.from_local_cache"
+              class="cache-tag"
+              title="remote unreachable — showing local mirror"
+            >local cache</span>
             <span class="status-icon" :class="r.status">{{ statusSymbol(r.status) }}</span>
           </li>
           <li v-if="!currentMonthRuns.length" class="empty-row">no runs in {{ currentMonth }}</li>
@@ -373,6 +378,18 @@ watch(currentMonthRuns, (runs) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.cache-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  padding: 0 6px;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
 .status-icon {

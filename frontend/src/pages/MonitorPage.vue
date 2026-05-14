@@ -10,6 +10,17 @@
           :on-load-sessions="loadSessions"
           @select="onPickSession"
         />
+        <button
+          v-if="remoteStatus.configured"
+          class="remote-chip"
+          :class="{ ok: remoteStatus.ok, bad: !remoteStatus.ok }"
+          @click="retryRemote"
+          :disabled="sessionsLoading"
+          :title="remoteTitle"
+        >
+          <span class="mdi" :class="remoteStatus.ok ? 'mdi-cloud-check-outline' : 'mdi-cloud-off-outline'"></span>
+          <span class="remote-host">{{ remoteStatus.host || 'remote' }}</span>
+        </button>
       </div>
 
       <div class="topbar-meta" v-if="sessionMeta">
@@ -31,6 +42,10 @@
             :class="sessionComplete.overall_passed ? 'mdi-check-circle-outline' : 'mdi-close-circle-outline'"
           ></span>
           {{ sessionComplete.overall_passed ? 'session passed' : 'session failed' }}
+        </span>
+        <span v-if="syncing" class="meta-chip syncing">
+          <span class="mdi mdi-cloud-download-outline"></span>
+          syncing…
         </span>
         <span class="meta-chip" :class="streaming ? 'live' : ''">
           <span class="dot" :class="streaming ? 'live' : 'idle'"></span>
@@ -150,6 +165,8 @@ function resetWidth() {
 const {
   sessionsTree,
   sessionsLoading,
+  remoteStatus,
+  syncing,
   selectedSessionId,
   sessionMeta,
   testLabels,
@@ -172,6 +189,18 @@ function onPickSession(sid) {
   if (!sid) return
   startWatching(sid)
 }
+
+function retryRemote() {
+  loadSessions(null)
+}
+
+const remoteTitle = computed(() => {
+  if (!remoteStatus.value.configured) return ''
+  if (remoteStatus.value.ok) return `remote ${remoteStatus.value.host} · click to refresh`
+  return `remote ${remoteStatus.value.host || ''} unreachable${
+    remoteStatus.value.error ? ` (${remoteStatus.value.error})` : ''
+  } · click to retry`
+})
 </script>
 
 <style scoped>
@@ -206,6 +235,32 @@ function onPickSession(sid) {
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
+
+.remote-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  font-family: inherit;
+  letter-spacing: 0.03em;
+}
+.remote-chip:disabled { cursor: wait; opacity: 0.6; }
+.remote-chip .mdi { font-size: 13px; }
+.remote-chip.ok  { color: var(--ok);     background: rgba(57, 211, 83, 0.10);  border-color: rgba(57, 211, 83, 0.35); }
+.remote-chip.bad { color: var(--danger); background: rgba(248, 81, 73, 0.10); border-color: rgba(248, 81, 73, 0.35); }
+.remote-host { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; }
+
+.meta-chip.syncing {
+  color: var(--info);
+  background: rgba(56, 139, 253, 0.10);
+}
+.meta-chip.syncing .mdi { font-size: 12px; }
 
 .topbar-meta {
   display: flex;
