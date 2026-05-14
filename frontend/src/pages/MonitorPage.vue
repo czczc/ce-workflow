@@ -21,6 +21,16 @@
           <span class="mdi" :class="remoteChipIcon"></span>
           <span class="remote-host">{{ remoteStatus.host || 'remote' }}</span>
         </button>
+        <button
+          v-if="remoteStatus.configured && selectedSessionId"
+          class="remote-chip force-resync"
+          @click="forceResync"
+          :disabled="syncing || !selectedSessionId"
+          title="Force re-rsync this run from the remote"
+        >
+          <span class="mdi mdi-sync"></span>
+          resync
+        </button>
       </div>
 
       <div class="topbar-meta" v-if="sessionMeta">
@@ -260,6 +270,11 @@ function retryRemote() {
   loadSessions(null)
 }
 
+function forceResync() {
+  if (!selectedSessionId.value) return
+  startWatching(selectedSessionId.value, { force: true })
+}
+
 const remoteTitle = computed(() => {
   const s = remoteStatus.value
   if (!s.configured) return ''
@@ -336,6 +351,8 @@ const remoteChipIcon = computed(() => {
 }
 .remote-chip:disabled { cursor: wait; opacity: 0.6; }
 .remote-chip .mdi { font-size: 13px; }
+.remote-chip.force-resync { color: var(--ink-2); }
+.remote-chip.force-resync:hover:not(:disabled) { color: var(--ink-1); border-color: var(--line-1); }
 .remote-chip.ok   { color: var(--ok);     background: rgba(57, 211, 83, 0.10);  border-color: rgba(57, 211, 83, 0.35); }
 .remote-chip.warn { color: var(--warning, #d29922); background: rgba(210, 153, 34, 0.12); border-color: rgba(210, 153, 34, 0.40); }
 .remote-chip.bad  { color: var(--danger); background: rgba(248, 81, 73, 0.10); border-color: rgba(248, 81, 73, 0.35); }

@@ -91,7 +91,7 @@ export function useMonitor() {
     return f.diagnostics[test_id]
   }
 
-  async function startWatching(sessionId) {
+  async function startWatching(sessionId, { force = false } = {}) {
     stopWatching()
     if (!sessionId) return
     _resetSessionState()
@@ -100,7 +100,10 @@ export function useMonitor() {
     abortCtrl = new AbortController()
 
     try {
-      const resp = await fetch(`/monitor/sessions/${sessionId}/stream`, {
+      const url = force
+        ? `/monitor/sessions/${sessionId}/stream?force=1`
+        : `/monitor/sessions/${sessionId}/stream`
+      const resp = await fetch(url, {
         signal: abortCtrl.signal,
       })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)

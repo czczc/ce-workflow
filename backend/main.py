@@ -326,9 +326,9 @@ async def monitor_session_asset(session_id: str, femb_id: str, filename: str):
 
 
 @app.get("/monitor/sessions/{session_id}/stream")
-async def monitor_session_stream(session_id: str):
+async def monitor_session_stream(session_id: str, force: int = 0):
     return StreamingResponse(
-        watch_session(session_id),
+        watch_session(session_id, force_resync=bool(force)),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

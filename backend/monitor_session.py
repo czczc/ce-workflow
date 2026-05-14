@@ -1312,7 +1312,7 @@ async def _stream_summary_for_existing_row(
     })
 
 
-async def watch_session(session_id: str) -> AsyncIterator[str]:
+async def watch_session(session_id: str, *, force_resync: bool = False) -> AsyncIterator[str]:
     """SSE generator: emits session_info, per-file events, per-failure diagnostic
     events (concurrent), per-FEMB summary on Final_Report, and session_complete
     when all FEMBs are persisted. Ends after the producer and all spawned tasks
@@ -1335,7 +1335,7 @@ async def watch_session(session_id: str) -> AsyncIterator[str]:
             yield event({"type": "error", "message": "invalid session id"})
             yield DONE
             return
-        if not _local_is_complete_and_persisted(sync_rel_path):
+        if force_resync or not _local_is_complete_and_persisted(sync_rel_path):
             yield event({"type": "sync_start", "rel_path": sync_rel_path})
             sync_state = await monitor_sync.ensure_one_shot_or_loop(sync_rel_path)
             if sync_state.done_reason == "preflight_failed":
