@@ -79,11 +79,13 @@
           <FembTimeline
             v-for="f in fembs"
             :key="f.femb_id"
+            :ref="(el) => setTimelineRef(f.femb_id, el)"
             :femb="f"
             :state="eventsByFemb[f.femb_id] || { tests: {}, final: false, diagnostics: {} }"
             :test-labels="testLabels"
             :on-regenerate="regenerateDiagnostic"
             :on-clear="clearDiagnostic"
+            @show-report="onShowReport"
           />
         </div>
       </div>
@@ -113,6 +115,17 @@
         </button>
       </aside>
     </div>
+
+    <ReportModal
+      :open="reportModal.open"
+      :loading="reportModal.loading"
+      :error="reportModal.error"
+      :test-id="reportModal.testId"
+      :test-name="testLabels[reportModal.testId] || ''"
+      :report="reportModal.report"
+      @close="closeReport"
+      @jump-diagnostic="onJumpDiagnostic"
+    />
   </div>
 </template>
 
@@ -121,6 +134,7 @@ import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 import { useMonitor } from '../composables/useMonitor'
 import FembTimeline from '../components/monitor/FembTimeline.vue'
 import MonitorChat from '../components/monitor/MonitorChat.vue'
+import ReportModal from '../components/monitor/ReportModal.vue'
 import SessionPicker from '../components/monitor/SessionPicker.vue'
 
 const DEFAULT_CHAT_WIDTH = 400
@@ -166,6 +180,52 @@ function resetWidth() {
   localStorage.setItem('monitor.chatWidth', String(chatWidth.value))
 }
 
+const timelineRefs = new Map()
+function setTimelineRef(fembId, el) {
+  if (el) timelineRefs.set(fembId, el)
+  else timelineRefs.delete(fembId)
+}
+
+const reportModal = ref({
+  open: false,
+  loading: false,
+  error: '',
+  fembId: '',
+  testId: '',
+  report: null,
+})
+
+async function onShowReport({ femb_id, test_id }) {
+  reportModal.value = {
+    open: true,
+    loading: true,
+    error: '',
+    fembId: femb_id,
+    testId: test_id,
+    report: null,
+  }
+  const data = await loadTestReport(femb_id, test_id)
+  if (!reportModal.value.open) return  // user dismissed mid-fetch
+  if (data) {
+    reportModal.value.loading = false
+    reportModal.value.report = data
+  } else {
+    reportModal.value.loading = false
+    reportModal.value.error = 'Report not found (file may not exist yet).'
+  }
+}
+
+function closeReport() {
+  reportModal.value.open = false
+}
+
+function onJumpDiagnostic() {
+  const { fembId, testId } = reportModal.value
+  closeReport()
+  const tl = timelineRefs.get(fembId)
+  tl?.scrollToDiagnostic?.(testId)
+}
+
 const {
   sessionsTree,
   sessionsLoading,
@@ -185,6 +245,7 @@ const {
   stopWatching,
   regenerateDiagnostic,
   clearDiagnostic,
+  loadTestReport,
 } = useMonitor()
 
 onMounted(() => loadSessions())

@@ -86,14 +86,20 @@ async def rsync_pull(
 ) -> None:
     """Rsync `host:remote_path/` into `local_path/`.
 
-    With md_only=True (default), only `.md` files are transferred, preserving
-    directory structure. The receiver writes via temp+atomic-rename so the local
+    With md_only=True (default), only `.md` (report text) and `.png` (plots
+    embedded in those reports) are transferred, preserving directory
+    structure. The receiver writes via temp+atomic-rename so the local
     watcher never sees a half-written file. Raises RemoteError on failure.
     """
     local_path.mkdir(parents=True, exist_ok=True)
     args: list[str] = ["rsync", "-a", "-e", SSH_CMD_FOR_RSYNC]
     if md_only:
-        args += ["--include=*/", "--include=*.md", "--exclude=*"]
+        args += [
+            "--include=*/",
+            "--include=*.md",
+            "--include=*.png",
+            "--exclude=*",
+        ]
     # Trailing slashes are important: copy *contents* of remote_path into local_path.
     args += [f"{host}:{remote_path.rstrip('/')}/", str(local_path).rstrip("/") + "/"]
 

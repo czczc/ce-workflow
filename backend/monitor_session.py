@@ -390,6 +390,99 @@ def get_session(session_id: str) -> SessionMeta | None:
     return _build_session_meta(rel_path, abs_path)
 
 
+_MD_IMG_RE = re.compile(r"(!\[[^\]]*\]\()([^)\s]+)(\))")
+_HTML_IMG_RE = re.compile(
+    r'(<img\b[^>]*?\bsrc\s*=\s*["\'])([^"\']+)(["\'])',
+    re.IGNORECASE,
+)
+
+
+def _rewrite_md_image_urls(md: str, asset_base: str) -> str:
+    """Rewrite both Markdown `![alt](path.png)` and HTML `<img src="path.png">`
+    image references so relative paths resolve via the backend asset endpoint
+    instead of the page URL. Absolute URLs and data: URIs pass through.
+    """
+    def sub(m: re.Match) -> str:
+        head, url, tail = m.group(1), m.group(2).strip(), m.group(3)
+        if url.startswith(("http://", "https://", "/", "data:")):
+            return m.group(0)
+        return f"{head}{asset_base}/{url}{tail}"
+    md = _MD_IMG_RE.sub(sub, md)
+    md = _HTML_IMG_RE.sub(sub, md)
+    return md
+
+
+async def get_report_md(
+    session_id: str, femb_id: str, test_id: str
+) -> dict | None:
+    """Return the raw markdown for a single report file, or None if not found.
+
+    Shape: {"test_id", "status": "pass"|"fail", "filename", "md"}.
+    `femb_id` is "S0" / "S1"; `test_id` is "t1".."t17". Relative image refs
+    in the markdown are rewritten to point at the asset endpoint so the
+    embedded `.png` plots load from the local mirror.
+    """
+    meta = get_session(session_id)
+    if meta is None:
+        return None
+    femb = next((f for f in meta.fembs if f.femb_id == femb_id), None)
+    if femb is None:
+        return None
+    if not test_id.startswith("t") or not test_id[1:].isdigit():
+        return None
+    t_num = int(test_id[1:])
+    slot = femb_id.lstrip("S")
+    femb_dir = meta.abs_path / femb.subdir
+    if not femb_dir.is_dir():
+        return None
+    for p in femb_dir.iterdir():
+        m = REPORT_RE.match(p.name)
+        if not m:
+            continue
+        if int(m.group(1)) != t_num or m.group(3) != slot:
+            continue
+        status = "pass" if m.group(2) == "P" else "fail"
+        try:
+            md = await monitor_sync.stable_read_text(p)
+        except Exception:
+            return None
+        asset_base = f"/monitor/sessions/{session_id}/femb/{femb_id}/assets"
+        md = _rewrite_md_image_urls(md, asset_base)
+        return {
+            "test_id": test_id,
+            "status": status,
+            "filename": p.name,
+            "md": md,
+        }
+    return None
+
+
+def get_report_asset_path(
+    session_id: str, femb_id: str, filename: str
+) -> Path | None:
+    """Resolve `filename` (which may be a relative path with sub-dirs) to a
+    file under the FEMB subdir of the local mirror. Rejects backslashes and
+    any resolved path that escapes the FEMB subdir. Returns None if not found.
+    """
+    if not filename or "\\" in filename:
+        return None
+    meta = get_session(session_id)
+    if meta is None:
+        return None
+    femb = next((f for f in meta.fembs if f.femb_id == femb_id), None)
+    if femb is None:
+        return None
+    femb_root = (meta.abs_path / femb.subdir).resolve()
+    p = (femb_root / filename).resolve()
+    try:
+        p.relative_to(femb_root)
+    except ValueError:
+        return None
+    if not p.is_file():
+        return None
+    return p
+
+
 # ─── Watcher: bridge watchdog → asyncio.Queue ──────────────────────────────
 
 class _AsyncEventBridge(FileSystemEventHandler):

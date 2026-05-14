@@ -7,7 +7,7 @@ import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from sse import DONE, event, ollama_tokens
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from catalog_agent import call_mcp_tool, get_report, list_reports
@@ -15,7 +15,13 @@ from config import settings
 from document_store import DocumentStore
 import monitor_chat
 import monitor_db
-from monitor_session import list_sessions, regenerate_diagnostic_stream, watch_session
+from monitor_session import (
+    get_report_asset_path,
+    get_report_md,
+    list_sessions,
+    regenerate_diagnostic_stream,
+    watch_session,
+)
 from pipeline import run_pipeline
 from rag_pipeline import ingest, query
 
@@ -301,6 +307,22 @@ async def list_documents():
 @app.get("/monitor/sessions")
 async def monitor_sessions(month: str | None = None):
     return await list_sessions(month=month)
+
+
+@app.get("/monitor/sessions/{session_id}/femb/{femb_id}/report/{test_id}")
+async def monitor_session_report(session_id: str, femb_id: str, test_id: str):
+    report = await get_report_md(session_id, femb_id, test_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="report not found")
+    return report
+
+
+@app.get("/monitor/sessions/{session_id}/femb/{femb_id}/assets/{filename:path}")
+async def monitor_session_asset(session_id: str, femb_id: str, filename: str):
+    path = get_report_asset_path(session_id, femb_id, filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="asset not found")
+    return FileResponse(path)
 
 
 @app.get("/monitor/sessions/{session_id}/stream")

@@ -277,6 +277,19 @@ export function useMonitor() {
     }
   }
 
+  async function loadTestReport(fembId, testId) {
+    if (!selectedSessionId.value || !fembId || !testId) return null
+    const url = `/monitor/sessions/${selectedSessionId.value}/femb/${encodeURIComponent(fembId)}/report/${encodeURIComponent(testId)}`
+    try {
+      const resp = await fetch(url)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      return await resp.json()
+    } catch (e) {
+      error.value = `Failed to load report: ${e.message}`
+      return null
+    }
+  }
+
   async function clearDiagnostic(fembRunId, fembId, testId = null) {
     const url = testId
       ? `/monitor/femb-runs/${fembRunId}/diagnostic?test_id=${encodeURIComponent(testId)}`
@@ -314,5 +327,6 @@ export function useMonitor() {
     stopWatching,
     regenerateDiagnostic,
     clearDiagnostic,
+    loadTestReport,
   }
 }

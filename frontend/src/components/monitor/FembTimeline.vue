@@ -135,7 +135,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { marked } from 'marked'
 
 const props = defineProps({
@@ -147,9 +147,16 @@ const props = defineProps({
   onClear:      { type: Function, default: null }, // (fembRunId, fembId) => void
 })
 
+const emit = defineEmits(['show-report'])
+
 function labelFor(testId) {
   return props.testLabels?.[testId] || ''
 }
+
+function scrollToDiagnostic(testId) {
+  diagRefs.get(testId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+defineExpose({ scrollToDiagnostic })
 
 const regeneratingAll = ref(false)
 const regeneratingCards = ref(new Set())  // test_ids currently regenerating individually
@@ -229,8 +236,7 @@ function cellTitle(t) {
   const head = name ? `${tid} · ${name}` : tid
   const v = props.state.tests?.[tid]
   if (!v) return `${head} — pending`
-  if (v === 'fail') return `${head} — fail (click to jump to diagnostic)`
-  return `${head} — ${v}`
+  return `${head} — ${v} (click to view report)`
 }
 
 const diagRefs = new Map()
@@ -239,9 +245,12 @@ function setDiagRef(testId, el) {
 }
 function onCellClick(t) {
   const tid = `t${t}`
-  if (props.state.tests?.[tid] !== 'fail') return
-  nextTick(() => {
-    diagRefs.get(tid)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const status = props.state.tests?.[tid]
+  if (!status) return  // pending cells: no report yet
+  emit('show-report', {
+    femb_id: props.femb.femb_id,
+    test_id: tid,
+    status,
   })
 }
 function renderMarkdown(text) {
@@ -352,8 +361,10 @@ function renderMarkdown(text) {
 .cell.pass {
   background: rgba(57, 211, 83, 0.08);
   border-color: rgba(57, 211, 83, 0.4);
+  cursor: pointer;
 }
 .cell.pass .cell-icon { color: var(--ok); }
+.cell.pass:hover { border-color: var(--ok); }
 .cell.fail {
   background: rgba(248, 81, 73, 0.08);
   border-color: rgba(248, 81, 73, 0.4);
