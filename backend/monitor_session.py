@@ -707,11 +707,12 @@ async def _file_producer(meta: SessionMeta, out: asyncio.Queue) -> None:
             try:
                 abs_str, _ = await asyncio.wait_for(queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
+                # Watchdog can silently miss rsync-delivered files (temp-file
+                # rename, and the inotify race for newly-created FEMB subdirs),
+                # so periodically rescan disk to surface anything it dropped.
+                # Cheap (local stat walk) and deduped via seen_paths.
+                await _flush_disk_state()
                 if _all_fembs_finalized(meta):
-                    # Belt-and-suspenders: emit any files the watchdog hasn't
-                    # surfaced yet (race between the FS scan and the kernel
-                    # event delivery) BEFORE exiting.
-                    await _flush_disk_state()
                     return
                 continue
 
