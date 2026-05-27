@@ -10,6 +10,10 @@ export function useMonitor() {
   // events merge into it. `stalled` flips the chip red and triggers the
   // session-level "sync stalled" badge.
   const remoteStatus = ref({ configured: false })
+  // Runtime monitor mode: { mode: 'remote'|'local', remote_configured, host }.
+  // The toggle (POST /monitor/config) flips remote ↔ local fake-QC without an
+  // .env edit / restart. `remote_configured` gates whether the toggle is shown.
+  const monitorMode = ref({ mode: 'local', remote_configured: false, host: '' })
   // Per-session one-shot rsync progress flag (true between sync_start and sync_done)
   const syncing = ref(false)
   const syncStalled = ref(false)
@@ -23,6 +27,24 @@ export function useMonitor() {
   let abortCtrl = null
 
   const fembs = computed(() => sessionMeta.value?.fembs ?? [])
+
+  async function loadMonitorConfig() {
+    try {
+      const resp = await fetch('/monitor/config')
+      if (resp.ok) monitorMode.value = await resp.json()
+    } catch {
+      /* leave default local mode on failure */
+    }
+  }
+
+  async function setMonitorMode(mode) {
+    const resp = await fetch('/monitor/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    })
+    if (resp.ok) monitorMode.value = await resp.json()
+  }
 
   async function loadSessions(month = null) {
     sessionsLoading.value = true
@@ -315,6 +337,9 @@ export function useMonitor() {
     sessionsTree,
     sessionsLoading,
     remoteStatus,
+    monitorMode,
+    loadMonitorConfig,
+    setMonitorMode,
     syncing,
     syncStalled,
     selectedSessionId,

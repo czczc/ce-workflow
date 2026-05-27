@@ -11,6 +11,18 @@
           @select="onPickSession"
         />
         <button
+          v-if="monitorMode.remote_configured"
+          class="remote-chip mode-toggle"
+          @click="toggleMonitorMode"
+          :disabled="sessionsLoading || streaming"
+          :title="monitorMode.mode === 'remote'
+            ? `Live remote (${monitorMode.host}) · click to switch to local fake QC`
+            : 'Local fake QC · click to switch to live remote'"
+        >
+          <span class="mdi" :class="monitorMode.mode === 'remote' ? 'mdi-server-network' : 'mdi-flask-outline'"></span>
+          {{ monitorMode.mode === 'remote' ? 'remote' : 'local (fake QC)' }}
+        </button>
+        <button
           v-if="remoteStatus.configured"
           class="remote-chip"
           :class="remoteChipClass"
@@ -240,6 +252,9 @@ const {
   sessionsTree,
   sessionsLoading,
   remoteStatus,
+  monitorMode,
+  loadMonitorConfig,
+  setMonitorMode,
   syncing,
   syncStalled,
   selectedSessionId,
@@ -258,8 +273,17 @@ const {
   loadTestReport,
 } = useMonitor()
 
-onMounted(() => loadSessions())
+onMounted(async () => {
+  await loadMonitorConfig()
+  loadSessions()
+})
 onBeforeUnmount(() => stopWatching())
+
+async function toggleMonitorMode() {
+  const next = monitorMode.value.mode === 'remote' ? 'local' : 'remote'
+  await setMonitorMode(next)
+  await loadSessions(null)
+}
 
 function onPickSession(sid) {
   if (!sid) return
@@ -351,6 +375,8 @@ const remoteChipIcon = computed(() => {
 }
 .remote-chip:disabled { cursor: wait; opacity: 0.6; }
 .remote-chip .mdi { font-size: 13px; }
+.remote-chip.mode-toggle { color: var(--ink-2); }
+.remote-chip.mode-toggle:hover:not(:disabled) { color: var(--ink-1); border-color: var(--line-1); }
 .remote-chip.force-resync { color: var(--ink-2); }
 .remote-chip.force-resync:hover:not(:disabled) { color: var(--ink-1); border-color: var(--line-1); }
 .remote-chip.ok   { color: var(--ok);     background: rgba(57, 211, 83, 0.10);  border-color: rgba(57, 211, 83, 0.35); }

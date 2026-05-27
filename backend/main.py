@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from catalog_agent import call_mcp_tool, get_report, list_reports
-from config import settings
+from config import settings, monitor_mode_state, set_monitor_mode
 from document_store import DocumentStore
 import monitor_chat
 import monitor_db
@@ -307,6 +307,23 @@ async def list_documents():
 @app.get("/monitor/sessions")
 async def monitor_sessions(month: str | None = None):
     return await list_sessions(month=month)
+
+
+class MonitorConfigRequest(BaseModel):
+    mode: str  # "remote" | "local"
+
+
+@app.get("/monitor/config")
+async def monitor_get_config():
+    return monitor_mode_state()
+
+
+@app.post("/monitor/config")
+async def monitor_set_config(body: MonitorConfigRequest):
+    try:
+        return set_monitor_mode(body.mode)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/monitor/sessions/{session_id}/femb/{femb_id}/report/{test_id}")

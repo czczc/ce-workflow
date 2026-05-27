@@ -46,3 +46,27 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# The .env REMOTE_HOST is the canonical remote host. The /monitor mode toggle
+# (GET/POST /monitor/config) flips settings.remote_host between this value and
+# "" at runtime, so devs can switch to local fake-QC mode without editing .env
+# or restarting. Not persisted: on restart .env is authoritative again.
+_env_remote_host = settings.remote_host
+
+
+def monitor_mode_state() -> dict:
+    return {
+        "mode": "remote" if settings.remote_host else "local",
+        "remote_configured": bool(_env_remote_host),
+        "host": _env_remote_host,
+    }
+
+
+def set_monitor_mode(mode: str) -> dict:
+    if mode == "remote":
+        settings.remote_host = _env_remote_host
+    elif mode == "local":
+        settings.remote_host = ""
+    else:
+        raise ValueError(f"unknown monitor mode: {mode!r}")
+    return monitor_mode_state()

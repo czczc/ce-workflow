@@ -160,3 +160,24 @@ def test_list_documents_empty():
 
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+def test_monitor_config_toggle_round_trips():
+    import config
+
+    before = config.settings.remote_host
+    try:
+        start = client.get("/monitor/config").json()
+        assert start["mode"] in ("remote", "local")
+
+        local = client.post("/monitor/config", json={"mode": "local"}).json()
+        assert local["mode"] == "local"
+        assert config.settings.remote_host == ""
+
+        remote = client.post("/monitor/config", json={"mode": "remote"}).json()
+        assert remote["mode"] == ("remote" if remote["remote_configured"] else "local")
+        assert remote["host"] == config._env_remote_host
+
+        assert client.post("/monitor/config", json={"mode": "bogus"}).status_code == 400
+    finally:
+        config.settings.remote_host = before
