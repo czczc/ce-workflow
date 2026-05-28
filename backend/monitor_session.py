@@ -9,6 +9,7 @@ Pure async; no LangGraph. The diagnostic subgraph is wired in slice #60.
 import asyncio
 import base64
 import re
+import sys
 import threading
 from collections import defaultdict
 from dataclasses import dataclass
@@ -29,6 +30,12 @@ from sse import DONE, event
 
 # Test number → short human-readable name (e.g. 1 → "pwr_consumption").
 TEST_LABELS: dict[str, str] = {f"t{n}": spec["name"] for n, spec in TEST_ITEMS.items()}
+
+
+def _log(msg: str) -> None:
+    """Diagnostic log to stderr — see #68. Tag every line so it can be
+    grepped out of the uvicorn output during live debugging."""
+    print(f"[monitor_session] {msg}", file=sys.stderr, flush=True)
 
 # ─── Filename / dir-name patterns ──────────────────────────────────────────
 
@@ -676,6 +683,10 @@ async def _sync_status_poller(rel_path: str, out: asyncio.Queue) -> None:
 async def _file_producer(meta: SessionMeta, out: asyncio.Queue) -> None:
     """Push test_pass / test_fail / final_report payloads onto `out`."""
     seen_paths: set[str] = set()
+    _log(
+        f"_file_producer START rel={meta.rel_path!r} "
+        f"fembs={[f.femb_id for f in meta.fembs]}"
+    )
 
     async def _flush_disk_state() -> None:
         """Scan the run dir and push any matching files not yet seen.
@@ -693,6 +704,7 @@ async def _file_producer(meta: SessionMeta, out: asyncio.Queue) -> None:
     await _flush_disk_state()
 
     if _all_fembs_finalized(meta):
+        _log(f"_file_producer EXIT-at-start rel={meta.rel_path!r} reason=already_finalized")
         return
 
     loop = asyncio.get_running_loop()
@@ -713,6 +725,7 @@ async def _file_producer(meta: SessionMeta, out: asyncio.Queue) -> None:
                 # Cheap (local stat walk) and deduped via seen_paths.
                 await _flush_disk_state()
                 if _all_fembs_finalized(meta):
+                    _log(f"_file_producer EXIT-via-timeout rel={meta.rel_path!r} reason=finalized")
                     return
                 continue
 
@@ -725,6 +738,7 @@ async def _file_producer(meta: SessionMeta, out: asyncio.Queue) -> None:
             if payload["type"] == "final_report" and _all_fembs_finalized(meta):
                 # Same guarantee on the natural exit path.
                 await _flush_disk_state()
+                _log(f"_file_producer EXIT-on-final rel={meta.rel_path!r} reason=finalized")
                 return
     finally:
         observer.stop()
@@ -732,6 +746,7 @@ async def _file_producer(meta: SessionMeta, out: asyncio.Queue) -> None:
             await asyncio.to_thread(observer.join, 2.0)
         except Exception:
             pass
+        _log(f"_file_producer END rel={meta.rel_path!r}")
 
 
 def _is_placeholder_summary(md: str | None) -> bool:
@@ -1336,9 +1351,19 @@ async def watch_session(session_id: str, *, force_resync: bool = False) -> Async
             yield event({"type": "error", "message": "invalid session id"})
             yield DONE
             return
-        if force_resync or not _local_is_complete_and_persisted(sync_rel_path):
+        cached = _local_is_complete_and_persisted(sync_rel_path)
+        _log(
+            f"watch_session ENTER rel={sync_rel_path!r} force_resync={force_resync} "
+            f"local_is_complete_and_persisted={cached}"
+        )
+        if force_resync or not cached:
             yield event({"type": "sync_start", "rel_path": sync_rel_path})
             sync_state = await monitor_sync.ensure_one_shot_or_loop(sync_rel_path)
+            _log(
+                f"watch_session ensure returned rel={sync_rel_path!r} "
+                f"done={sync_state.done} reason={sync_state.done_reason!r} "
+                f"task={'live' if (sync_state.task is not None and not sync_state.done) else 'none'}"
+            )
             if sync_state.done_reason == "preflight_failed":
                 yield event({
                     "type": "error",
@@ -1363,6 +1388,10 @@ async def watch_session(session_id: str, *, force_resync: bool = False) -> Async
 
     yield event({"type": "session_info", **meta.to_json(), "test_labels": TEST_LABELS})
 
+    _log(
+        f"watch_session meta rel={meta.rel_path!r} fembs={[f.femb_id for f in meta.fembs]} "
+        f"all_finalized={_all_fembs_finalized(meta)}"
+    )
     # Fast-path: every FEMB has a Final_Report on disk AND a DB row (diagnostics
     # are saved). Replay file events + cached diagnostics; if any row has a
     # placeholder summary (interrupted earlier), stream a fresh summary inline
@@ -1370,6 +1399,7 @@ async def watch_session(session_id: str, *, force_resync: bool = False) -> Async
     if _all_fembs_finalized(meta) and meta.fembs:
         runs = monitor_db.store.list_femb_runs(session_db_id)
         if len(runs) == len(meta.fembs):
+            _log(f"watch_session FAST_PATH rel={meta.rel_path!r} — replay only")
             async for sse_chunk in _replay_persisted(meta, session_db_id, runs):
                 yield sse_chunk
             yield DONE

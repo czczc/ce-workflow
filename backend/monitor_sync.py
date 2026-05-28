@@ -22,12 +22,20 @@ from __future__ import annotations
 
 import asyncio
 import shlex
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import ssh_helper
 from config import settings
+
+
+def _log(msg: str) -> None:
+    """Diagnostic log to stderr. See #68: live auto-update was wedging without
+    surfacing where in the pipeline. Tag every line so it can be grepped out
+    of the uvicorn output."""
+    print(f"[monitor_sync] {msg}", file=sys.stderr, flush=True)
 
 
 @dataclass
@@ -134,6 +142,7 @@ async def _do_rsync(state: SyncTaskState) -> None:
         state.last_error = str(e)
         if state.cycle_failures >= 3:
             state.stalled = True
+        _log(f"_do_rsync rel={state.rel_path!r} RemoteError failures={state.cycle_failures}: {e}")
     finally:
         state.last_cycle_at = time.time()
 
@@ -144,10 +153,18 @@ async def _sync_loop(state: SyncTaskState) -> None:
     """
     interval = max(1, settings.sync_interval_sec)
     idle_timeout = max(60, settings.sync_idle_timeout_min * 60)
+    cycle = 0
+    _log(f"_sync_loop START rel={state.rel_path!r} interval={interval}s idle_timeout={idle_timeout}s")
     try:
         while not state.done:
+            cycle += 1
             await _do_rsync(state)
             state.first_cycle_done.set()
+            newest = _local_newest_md_mtime(state.rel_path)
+            _log(
+                f"_sync_loop cycle={cycle} rel={state.rel_path!r} ok={state.last_cycle_ok} "
+                f"failures={state.cycle_failures} local_newest_mtime={newest:.0f}"
+            )
 
             # Termination: all FEMBs have a Final_Report locally.
             if _local_all_fembs_finalized(state.rel_path):
@@ -155,7 +172,6 @@ async def _sync_loop(state: SyncTaskState) -> None:
                 break
 
             # Idle timeout: only counts once we've seen at least one .md.
-            newest = _local_newest_md_mtime(state.rel_path)
             if newest > state.last_mtime_seen:
                 state.last_mtime_seen = newest
             if (
@@ -172,6 +188,7 @@ async def _sync_loop(state: SyncTaskState) -> None:
     finally:
         state.done = True
         state.first_cycle_done.set()
+        _log(f"_sync_loop EXIT rel={state.rel_path!r} cycles={cycle} reason={state.done_reason!r}")
         asyncio.create_task(_retire_task(state.rel_path, delay=30.0))
 
 
@@ -217,9 +234,11 @@ async def ensure_one_shot_or_loop(rel_path: str) -> SyncTaskState:
 
     if await_existing is not None:
         # Wait for at least one cycle so file-on-disk invariant holds.
+        _log(f"ensure ATTACH rel={rel_path!r} existing.done={state.done} reason={state.done_reason!r}")
         await state.first_cycle_done.wait()
         return state
 
+    _log(f"ensure NEW rel={rel_path!r} — running preflight")
     # Pre-flight: how stale is the run on the remote?
     try:
         newest_remote = await _remote_newest_md_mtime(rel_path)
@@ -230,12 +249,18 @@ async def ensure_one_shot_or_loop(rel_path: str) -> SyncTaskState:
         state.done = True
         state.done_reason = "preflight_failed"
         state.first_cycle_done.set()
+        _log(f"ensure preflight_failed rel={rel_path!r}: {e}")
         asyncio.create_task(_retire_task(rel_path, delay=30.0))
         return state
 
     stale_threshold = settings.sync_preflight_stale_hours * 3600
     is_stale = (
         newest_remote is None or (time.time() - newest_remote) > stale_threshold
+    )
+    age = (time.time() - newest_remote) if newest_remote is not None else None
+    _log(
+        f"ensure preflight rel={rel_path!r} newest_remote={newest_remote} "
+        f"age_sec={age} stale_threshold={stale_threshold} is_stale={is_stale}"
     )
     # Seed idle clock with pre-flight mtime so partly-stalled runs don't get a
     # fresh 30-minute budget.
@@ -244,6 +269,7 @@ async def ensure_one_shot_or_loop(rel_path: str) -> SyncTaskState:
 
     if is_stale:
         # One-shot rsync, no loop.
+        _log(f"ensure -> ONE_SHOT rel={rel_path!r}")
         await _do_rsync(state)
         state.done = True
         state.done_reason = "one_shot"
@@ -252,6 +278,7 @@ async def ensure_one_shot_or_loop(rel_path: str) -> SyncTaskState:
         return state
 
     # Fresh: spawn the loop task and wait for its first cycle to land.
+    _log(f"ensure -> LOOP rel={rel_path!r}")
     state.task = asyncio.create_task(_sync_loop(state))
     await state.first_cycle_done.wait()
     return state
