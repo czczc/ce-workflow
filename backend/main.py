@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from catalog_agent import call_mcp_tool, get_report, list_reports
+import monitor_mock_daq
 from config import settings, monitor_mode_state, set_monitor_mode
 from document_store import DocumentStore
 import monitor_chat
@@ -324,6 +325,29 @@ async def monitor_set_config(body: MonitorConfigRequest):
         return set_monitor_mode(body.mode)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/monitor/mock-daq/status")
+async def monitor_mock_daq_status():
+    return monitor_mock_daq.status()
+
+
+@app.post("/monitor/mock-daq/start")
+async def monitor_mock_daq_start():
+    if settings.remote_host:
+        raise HTTPException(
+            status_code=400,
+            detail="switch to local mode before starting the mock DAQ",
+        )
+    try:
+        return await monitor_mock_daq.start()
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.post("/monitor/mock-daq/stop")
+async def monitor_mock_daq_stop():
+    return await monitor_mock_daq.stop()
 
 
 @app.get("/monitor/sessions/{session_id}/femb/{femb_id}/report/{test_id}")

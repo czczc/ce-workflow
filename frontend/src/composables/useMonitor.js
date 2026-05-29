@@ -14,6 +14,11 @@ export function useMonitor() {
   // The toggle (POST /monitor/config) flips remote ↔ local fake-QC without an
   // .env edit / restart. `remote_configured` gates whether the toggle is shown.
   const monitorMode = ref({ mode: 'local', remote_configured: false, host: '' })
+  // Local-mode mock DAQ child process state: { running, started_at?, dest_name?, rel_path? }.
+  // Polled every 2s while running so the button flips back to "start" when the
+  // mock_daq.py script exits on its own.
+  const mockDaqStatus = ref({ running: false })
+  let mockDaqPollId = null
   // Per-session one-shot rsync progress flag (true between sync_start and sync_done)
   const syncing = ref(false)
   const syncStalled = ref(false)
@@ -44,6 +49,51 @@ export function useMonitor() {
       body: JSON.stringify({ mode }),
     })
     if (resp.ok) monitorMode.value = await resp.json()
+  }
+
+  async function loadMockDaqStatus() {
+    try {
+      const resp = await fetch('/monitor/mock-daq/status')
+      if (!resp.ok) return
+      mockDaqStatus.value = await resp.json()
+      // The script runs ~35s and exits on its own; stop polling once we see
+      // running=false so we're not hitting the backend forever.
+      if (!mockDaqStatus.value.running && mockDaqPollId) {
+        clearInterval(mockDaqPollId)
+        mockDaqPollId = null
+      }
+    } catch { /* leave last known status */ }
+  }
+
+  function _startMockDaqPolling() {
+    if (mockDaqPollId) clearInterval(mockDaqPollId)
+    mockDaqPollId = setInterval(loadMockDaqStatus, 2000)
+  }
+
+  async function startMockDaq() {
+    const resp = await fetch('/monitor/mock-daq/start', { method: 'POST' })
+    if (resp.ok) {
+      mockDaqStatus.value = await resp.json()
+      _startMockDaqPolling()
+      // mock_daq.py needs a couple seconds to lay down the run dir + first
+      // reports. Refresh the session tree once so the new *_MOCK_LN_QC entry
+      // is selectable in the picker; the user picks it themselves.
+      setTimeout(() => loadSessions(null), 3000)
+    } else {
+      const body = await resp.json().catch(() => ({}))
+      error.value = body.detail || `failed to start mock DAQ (HTTP ${resp.status})`
+    }
+  }
+
+  async function stopMockDaq() {
+    const resp = await fetch('/monitor/mock-daq/stop', { method: 'POST' })
+    if (resp.ok) {
+      mockDaqStatus.value = await resp.json()
+      if (mockDaqPollId) {
+        clearInterval(mockDaqPollId)
+        mockDaqPollId = null
+      }
+    }
   }
 
   async function loadSessions(month = null) {
@@ -340,6 +390,10 @@ export function useMonitor() {
     monitorMode,
     loadMonitorConfig,
     setMonitorMode,
+    mockDaqStatus,
+    loadMockDaqStatus,
+    startMockDaq,
+    stopMockDaq,
     syncing,
     syncStalled,
     selectedSessionId,

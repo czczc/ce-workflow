@@ -23,6 +23,18 @@
           {{ monitorMode.mode === 'remote' ? 'remote' : 'local (fake QC)' }}
         </button>
         <button
+          v-if="monitorMode.mode === 'local'"
+          class="remote-chip mock-daq"
+          :class="{ running: mockDaqStatus.running }"
+          @click="toggleMockDaq"
+          :title="mockDaqStatus.running
+            ? `Mock DAQ running → ${mockDaqStatus.dest_name} · click to stop`
+            : 'Drip-feed a fake QC run with random failures into qc_root'"
+        >
+          <span class="mdi" :class="mockDaqStatus.running ? 'mdi-stop-circle-outline' : 'mdi-play-circle-outline'"></span>
+          {{ mockDaqStatus.running ? 'stop fake DAQ' : 'start fake DAQ' }}
+        </button>
+        <button
           v-if="remoteStatus.configured"
           class="remote-chip"
           :class="remoteChipClass"
@@ -255,6 +267,10 @@ const {
   monitorMode,
   loadMonitorConfig,
   setMonitorMode,
+  mockDaqStatus,
+  loadMockDaqStatus,
+  startMockDaq,
+  stopMockDaq,
   syncing,
   syncStalled,
   selectedSessionId,
@@ -276,6 +292,7 @@ const {
 onMounted(async () => {
   await loadMonitorConfig()
   loadSessions()
+  loadMockDaqStatus()
 })
 onBeforeUnmount(() => stopWatching())
 
@@ -283,6 +300,11 @@ async function toggleMonitorMode() {
   const next = monitorMode.value.mode === 'remote' ? 'local' : 'remote'
   await setMonitorMode(next)
   await loadSessions(null)
+}
+
+function toggleMockDaq() {
+  if (mockDaqStatus.value.running) stopMockDaq()
+  else startMockDaq()
 }
 
 function onPickSession(sid) {
@@ -377,6 +399,9 @@ const remoteChipIcon = computed(() => {
 .remote-chip .mdi { font-size: 13px; }
 .remote-chip.mode-toggle { color: var(--ink-2); }
 .remote-chip.mode-toggle:hover:not(:disabled) { color: var(--ink-1); border-color: var(--line-1); }
+.remote-chip.mock-daq { color: var(--ink-2); }
+.remote-chip.mock-daq:hover:not(:disabled) { color: var(--ink-1); border-color: var(--line-1); }
+.remote-chip.mock-daq.running { color: var(--warning, #d29922); background: rgba(210, 153, 34, 0.10); border-color: rgba(210, 153, 34, 0.35); }
 .remote-chip.force-resync { color: var(--ink-2); }
 .remote-chip.force-resync:hover:not(:disabled) { color: var(--ink-1); border-color: var(--line-1); }
 .remote-chip.ok   { color: var(--ok);     background: rgba(57, 211, 83, 0.10);  border-color: rgba(57, 211, 83, 0.35); }
