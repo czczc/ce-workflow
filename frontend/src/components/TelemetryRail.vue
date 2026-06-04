@@ -80,7 +80,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSharedSession } from '../composables/useChat.js'
 import Sparkline from './Sparkline.vue'
@@ -89,26 +89,17 @@ const router = useRouter()
 const { messages, streaming } = useSharedSession()
 const showContext = ref(false)
 
-// ── Bench Telemetry mock data ──────────────────────────────────────────────
+// ── Bench Telemetry placeholder (no live hook yet — static values) ─────────
 const HIST_LEN = 24
-const tempHist = ref(Array.from({ length: HIST_LEN }, () => 89 + Math.random() * 0.4))
-const rmsHist  = ref(Array.from({ length: HIST_LEN }, () => 410 + Math.random() * 8))
+const tempHist = Array.from({ length: HIST_LEN }, () => 89 + Math.random() * 0.4)
+const rmsHist  = Array.from({ length: HIST_LEN }, () => 410 + Math.random() * 8)
 
-const tiles = computed(() => [
-  { id: 'temp',  label: 'Cryo Temp',     value: tempHist.value[HIST_LEN-1].toFixed(1),           unit: 'K',    hist: tempHist.value, color: 'var(--accent)' },
-  { id: 'bias',  label: 'Bias',          value: '1.80',                                           unit: 'V',    trend: '▴ within tol.', trendOk: true },
-  { id: 'rms',   label: 'RMS Noise',     value: String(Math.round(rmsHist.value[HIST_LEN - 1])), unit: 'ADC',  hist: rmsHist.value,  color: 'var(--ok)' },
-  { id: 'drift', label: 'Pedestal Drift',value: '0.02',                                           unit: '/min', trend: 'stable' },
-])
-
-let teleTimer
-onMounted(() => {
-  teleTimer = setInterval(() => {
-    tempHist.value = [...tempHist.value.slice(1), 89 + Math.random() * 0.4]
-    rmsHist.value  = [...rmsHist.value.slice(1),  410 + Math.random() * 8]
-  }, 1400)
-})
-onUnmounted(() => clearInterval(teleTimer))
+const tiles = [
+  { id: 'temp',  label: 'Cryo Temp',     value: tempHist[HIST_LEN - 1].toFixed(1),           unit: 'K',    hist: tempHist, color: 'var(--accent)' },
+  { id: 'bias',  label: 'Bias',          value: '1.80',                                       unit: 'V',    trend: '▴ within tol.', trendOk: true },
+  { id: 'rms',   label: 'RMS Noise',     value: String(Math.round(rmsHist[HIST_LEN - 1])),   unit: 'ADC',  hist: rmsHist,  color: 'var(--ok)' },
+  { id: 'drift', label: 'Pedestal Drift',value: '0.02',                                       unit: '/min', trend: 'stable' },
+]
 
 // ── Recent Runs ────────────────────────────────────────────────────────────
 const recentRuns = ref([])
